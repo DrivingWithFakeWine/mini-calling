@@ -1,0 +1,54 @@
+# ===== Maven =====
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# ===== IDE: IntelliJ IDEA =====
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+.idea_modules/
+
+# ===== IDE: Eclipse =====
+.classpath
+.project
+.settings/
+.factorypath
+.springBeans
+.sts4-cache
+
+# ===== IDE: VS Code =====
+.vscode/
+
+# ===== NetBeans =====
+nbproject/private/
+build/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+hs_err_pid*
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Spring Boot =====
+*.original
+*.jar!/
+application-local.yml
+application-local.properties
+
+# ===== Temp / Cache =====
+*.tmp
+*.swp
+*.cache
+*.diff
+*.patch
