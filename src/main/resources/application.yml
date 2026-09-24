@@ -36,7 +36,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  expiration: 86400000
+  expiration: 60000
   header: Authorization
   prefix: "Bearer "
 
@@ -44,3 +44,4 @@ logging:
   level:
     com.dking.mini_calling: debug
     org.springframework.security: DEBUG
+
