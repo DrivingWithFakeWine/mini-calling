@@ -1,14 +1,24 @@
 server:
   port: 8080
 
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: "*"          # 注意引号
+  endpoint:
+    health:
+      show-details: always
+
 spring:
   application:
     name: mini_calling
   profiles:
-    active: local          # 👈 新增：默认激活 local
+    active: local
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # url / username / password 挪走了
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
@@ -18,7 +28,7 @@ mybatis-plus:
   type-aliases-package: com.dking.mini_calling.entity
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl   # 上线前删
   global-config:
     db-config:
       logic-delete-field: deleted
@@ -26,11 +36,11 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  # secret 挪走了（它也是敏感信息！）
   expiration: 86400000
   header: Authorization
   prefix: "Bearer "
 
 logging:
   level:
-    com.dking.mini_calling: debug   # 顺便修正：原来写的 yourname.authsystem 包名不对
+    com.dking.mini_calling: debug
+    org.springframework.security: DEBUG
