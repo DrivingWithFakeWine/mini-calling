@@ -3,33 +3,34 @@ server:
 
 spring:
   application:
-    name: auth-system
+    name: mini_calling
+  profiles:
+    active: local          # 👈 新增：默认激活 local
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/auth_system?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root            # 账号
-    password: 123456789      # 密码
+    # url / username / password 挪走了
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
 
 mybatis-plus:
+  mapper-locations: classpath*:mapper/*.xml
+  type-aliases-package: com.dking.mini_calling.entity
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl  # 开发期打印 SQL
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# 自定义 JWT 配置（后续 JwtUtils 读取）
 jwt:
-  secret: your-256-bit-secret-key-here-please-change-me-in-production-1234567890
-  expiration: 86400000       # 24 小时（毫秒）
+  # secret 挪走了（它也是敏感信息！）
+  expiration: 86400000
   header: Authorization
   prefix: "Bearer "
 
 logging:
   level:
-    com.yourname.authsystem: debug
+    com.dking.mini_calling: debug   # 顺便修正：原来写的 yourname.authsystem 包名不对
