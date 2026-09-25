@@ -34,24 +34,24 @@ public class AuthController {
      * 认证成功返回 LoginUser，从中取出 userId 签发 token
      */
     @PostMapping("/login")
-    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+    public LoginResponse login(@Valid @RequestBody LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword()));
 
         LoginUser loginUser = (LoginUser) authentication.getPrincipal();
         String token = jwtUtil.generateToken(loginUser.getUsername(), loginUser.getUserId());
 
-        return ResponseEntity.ok(LoginResponse.builder()
+        return LoginResponse.builder()
                 .token(token)
                 .tokenType("Bearer")
                 .expiresIn(expirationMs / 1000)
                 .userId(loginUser.getUserId())
                 .username(loginUser.getUsername())
-                .build());
+                .build();
     }
 
     @GetMapping("/me")
-    public ResponseEntity<UserInfoResponse> me(@AuthenticationPrincipal LoginUser loginUser) {
+    public UserInfoResponse me(@AuthenticationPrincipal LoginUser loginUser) {
         // authorities 是角色+权限码的混合集合，按前缀拆开：
         //   ROLE_ 开头 → 角色；其余 → 细粒度权限码
         List<String> authorities = loginUser.getAuthorities().stream()
@@ -66,12 +66,12 @@ public class AuthController {
                 .filter(a -> !a.startsWith("ROLE_"))
                 .toList();
 
-        return ResponseEntity.ok(UserInfoResponse.builder()
+        return UserInfoResponse.builder()
                 .userId(loginUser.getUserId())
                 .username(loginUser.getUsername())
                 .nickname(loginUser.getNickname())
                 .roles(roles)
                 .permissions(permissions)
-                .build());
+                .build();
     }
 }

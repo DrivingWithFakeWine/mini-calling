@@ -1,6 +1,8 @@
 package com.dking.mini_calling.config;
 
+import com.dking.mini_calling.common.Result;
 import com.dking.mini_calling.filter.JwtAuthenticationFilter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -24,6 +26,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
+    private final ObjectMapper objectMapper;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -54,15 +58,14 @@ public class SecurityConfig {
                         .authenticationEntryPoint((request, response, authException) -> {
                             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                             response.setContentType("application/json;charset=UTF-8");
-                            response.getWriter().write(
-                                    "{\"code\":401,\"message\":\"未登录或 Token 无效\"}");
+                            response.getWriter().write(objectMapper.writeValueAsString(Result.fail(401, "未登录或 Token 无效")));
+
                         })
                         // 已认证但权限不够 → 403
                         .accessDeniedHandler((request, response, accessDeniedException) -> {
                             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                             response.setContentType("application/json;charset=UTF-8");
-                            response.getWriter().write(
-                                    "{\"code\":403,\"message\":\"无访问权限\"}");
+                            response.getWriter().write(objectMapper.writeValueAsString(Result.fail(403, "无访问权限")));
                         }))
 // ↑↑↑ 新增结束 ↑↑↑
                 // JWT filter 必须放在 UsernamePasswordAuthenticationFilter 之前
