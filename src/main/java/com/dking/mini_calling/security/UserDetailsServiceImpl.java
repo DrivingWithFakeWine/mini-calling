@@ -41,15 +41,25 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
         // 3. 查角色 + 权限，统一塞进 authorities
         List<SysRole> roles = roleMapper.selectByUserId(sysUser.getId());
-        List<SysPermission> permissions = permissionMapper.selectByUserId(sysUser.getId());
+        // 4. 查权限：超管绿灯直接拿权限表全量，普通用户按角色关联查
+        boolean isAdmin = roles.stream()
+                .anyMatch(r -> "ROLE_ADMIN".equals(r.getCode()));
+        List<SysPermission> permissions;
+        if (isAdmin) {
+            permissions = permissionMapper.selectList(null);   // MP BaseMapper 自带，查全表
+        } else {
+            permissions = permissionMapper.selectByUserId(sysUser.getId());
+        }
 
+
+        // 5。组装进authorities
         List<SimpleGrantedAuthority> authorities = Stream.concat(
                         roles.stream().map(r -> new SimpleGrantedAuthority(r.getCode())),       // ROLE_ADMIN
                         permissions.stream().map(p -> new SimpleGrantedAuthority(p.getCode()))) // user:delete
                 .distinct()
                 .toList();
 
-        // 4. 返回 LoginUser，password 字段是库里查出的 BCrypt 密文，
+        // 6. 返回 LoginUser，password 字段是库里查出的 BCrypt 密文，
         //    框架拿到后会和用户输入的明文做 matches() 比对
         return new LoginUser(sysUser, authorities);
     }

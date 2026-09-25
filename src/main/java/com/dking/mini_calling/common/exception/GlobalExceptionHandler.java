@@ -51,4 +51,9 @@ public class GlobalExceptionHandler {
                 "timestamp", System.currentTimeMillis()
         ));
     }
+
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<Map<String, Object>> handleBusiness(BusinessException e) {
+        return build(HttpStatus.BAD_REQUEST, e.getMessage());
+    }
 }

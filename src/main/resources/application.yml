@@ -36,7 +36,7 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 jwt:
-  expiration: 60000
+  expiration: 600000
   header: Authorization
   prefix: "Bearer "
 

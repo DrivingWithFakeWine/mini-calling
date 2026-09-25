@@ -1,7 +1,10 @@
 package com.dking.mini_calling.filter;
 
+import com.dking.mini_calling.security.LoginUser;
+import com.dking.mini_calling.security.UserDetailsServiceImpl;
 import com.dking.mini_calling.util.JwtUtil;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
@@ -24,6 +28,8 @@ import java.util.List;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
+    // 变更点 1：新增注入
+    private final UserDetailsServiceImpl userDetailsService;
 
     @Override
     protected void doFilterInternal(@NonNull HttpServletRequest request,
@@ -38,23 +44,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         String token = header.substring(7);
+        // 变更点 2：try 块整体替换
         try {
             Claims claims = jwtUtil.validateAndParse(token);
             String username = claims.getSubject();
-            Long userId = claims.get("uid", Long.class);
 
-            // 构建 Authentication 对象，credentials 传 null（JWT 无需密码）
+            // 实时加载用户 + 权限（用户被删/禁用会抛 AuthenticationException，进 catch）
+            LoginUser loginUser = (LoginUser) userDetailsService.loadUserByUsername(username);
+
             UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                            username, null, List.of());
-            // 把 userId 塞到 details 里，Controller 可以通过 SecurityContextHolder 取到
-            authentication.setDetails(claims);
-
+                    new UsernamePasswordAuthenticationToken(loginUser, null, loginUser.getAuthorities());
+            log.info("Filter 组装的 authorities = {}", loginUser.getAuthorities());
             SecurityContextHolder.getContext().setAuthentication(authentication);
-        } catch (io.jsonwebtoken.ExpiredJwtException e) {
-            log.debug("Token 已过期: {}", e.getMessage());
-        } catch (io.jsonwebtoken.JwtException | IllegalArgumentException e) {
-            log.debug("Token 无效: {}", e.getMessage());
+        } catch (AuthenticationException | JwtException | IllegalArgumentException e) {
+            log.debug("认证信息无效: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);
