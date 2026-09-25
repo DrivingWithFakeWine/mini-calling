@@ -46,6 +46,16 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/login", "/error").permitAll()
+                        // ↓↓↓ 新增：放行 swagger 相关路径 ↓↓↓
+                        .requestMatchers(
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/v3/api-docs",
+                                "/v3/api-docs/**",
+                                "/doc.html",            // 预留：以后换 knife4j 时不用改
+                                "/webjars/**"
+                        ).permitAll()
+                        // ↑↑↑ 新增结束 ↑↑↑
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))

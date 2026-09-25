@@ -5,6 +5,8 @@ import com.dking.mini_calling.dto.LoginResponse;
 import com.dking.mini_calling.dto.UserInfoResponse;
 import com.dking.mini_calling.security.LoginUser;
 import com.dking.mini_calling.util.JwtUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@Tag(name = "认证管理", description = "登录 / 当前用户信息")
 @RestController
 @RequestMapping("/auth")
 @RequiredArgsConstructor
@@ -33,6 +36,7 @@ public class AuthController {
      * 认证失败会抛 BadCredentialsException，由 GlobalExceptionHandler 转 401
      * 认证成功返回 LoginUser，从中取出 userId 签发 token
      */
+    @Operation(summary = "登录", description = "认证成功返回 JWT Token，供后续所有接口鉴权使用")
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
@@ -50,6 +54,7 @@ public class AuthController {
                 .build();
     }
 
+    @Operation(summary = "当前登录用户信息", description = "返回 userId、nickname、权限列表")
     @GetMapping("/me")
     public UserInfoResponse me(@AuthenticationPrincipal LoginUser loginUser) {
         // authorities 是角色+权限码的混合集合，按前缀拆开：

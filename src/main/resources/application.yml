@@ -45,3 +45,15 @@ logging:
     com.dking.mini_calling: debug
     org.springframework.security: DEBUG
 
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs          # OpenAPI JSON，Apifox 等工具可直接导入这个地址
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui/index.html
+    operations-sorter: alpha    # 接口按字母排序，找起来方便
+    tags-sorter: alpha
+    try-it-out-enabled: true    # 启用 Try it out 调试按钮
+
+
