@@ -14,3 +14,9 @@ INSERT INTO `mini_calling`.`sys_role_permission`(`role_id`, `permission_id`) VAL
 INSERT INTO `mini_calling`.`sys_role_permission`(`role_id`, `permission_id`) VALUES (1, 7);
 INSERT INTO `mini_calling`.`sys_role_permission`(`role_id`, `permission_id`) VALUES (1, 8);
 INSERT INTO `mini_calling`.`sys_role_permission`(`role_id`, `permission_id`) VALUES (1, 9);
+
+-- 创建新的权限，id=10,name=权限列表
+INSERT INTO `mini_calling`.`sys_permission`(`id`, `name`, `code`, `type`, `url`, `parent_id`) VALUES (10, '权限列表', 'permission:list', 3, NULL, 0);
+
+-- 插入sys_role_permission表，给 admin角色 新添加 权限 id=10,name=权限列表
+INSERT INTO `mini_calling`.`sys_role_permission`(`role_id`, `permission_id`) VALUES (1, 10);

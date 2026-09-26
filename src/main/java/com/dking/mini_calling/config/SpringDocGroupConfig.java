@@ -36,6 +36,14 @@ public class SpringDocGroupConfig {
                 .build();
     }
 
+    @Bean
+    public GroupedOpenApi permissionApi() {
+        return GroupedOpenApi.builder()
+                .group("04-权限管理")
+                .pathsToMatch("/permissions/**")
+                .build();
+    }
+
 
     // 兜底组，防止忘记添加分组，导致UI界面没渲染
     @Bean
