@@ -27,4 +27,23 @@ public class SpringDocGroupConfig {
                 .pathsToMatch("/users/**")
                 .build();
     }
+
+    @Bean
+    public GroupedOpenApi roleApi() {
+        return GroupedOpenApi.builder()
+                .group("03-角色管理")
+                .pathsToMatch("/roles/**")
+                .build();
+    }
+
+
+    // 兜底组，防止忘记添加分组，导致UI界面没渲染
+    @Bean
+    public GroupedOpenApi allApi() {
+        return GroupedOpenApi.builder()
+                .group("00-全部接口")
+                .pathsToMatch("/**")
+                .build();
+    }
+
 }

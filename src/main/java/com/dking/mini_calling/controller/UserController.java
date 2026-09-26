@@ -1,6 +1,7 @@
 package com.dking.mini_calling.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.dking.mini_calling.dto.AssignRolesRequest;
 import com.dking.mini_calling.dto.ChangePasswordRequest;
 import com.dking.mini_calling.dto.UserCreateRequest;
 import com.dking.mini_calling.dto.UserPageResponse;
@@ -54,6 +55,14 @@ public class UserController {
     public void changePassword(@AuthenticationPrincipal LoginUser loginUser,
                                @Valid @RequestBody ChangePasswordRequest request) {
         userService.changePassword(loginUser.getUserId(), request);
+    }
+
+    @Operation(summary = "为用户分配角色", description = "需 role:assign 权限，传空数组则清空该用户所有角色")
+    @PutMapping("/{id}/roles")
+    @PreAuthorize("hasAuthority('role:assign')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void assignRoles(@PathVariable Long id, @Valid @RequestBody AssignRolesRequest request) {
+        userService.assignRoles(id, request.getRoleIds());
     }
 }
 

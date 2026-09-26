@@ -13,7 +13,10 @@ import com.dking.mini_calling.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
 
 // service/impl/UserServiceImpl.java
 @Service
@@ -87,6 +90,19 @@ public class UserServiceImpl implements UserService {
         resp.setEnabled(user.getEnabled());
         resp.setCreateTime(user.getCreateTime());
         return resp;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void assignRoles(Long userId, List<Long> roleIds) {
+        if (userMapper.selectById(userId) == null) {
+            throw new BusinessException("用户不存在");
+        }
+        // 先清空再批量插入，幂等
+        userMapper.deleteUserRolesByUserId(userId);
+        if (roleIds != null && !roleIds.isEmpty()) {
+            userMapper.batchInsertUserRoles(userId, roleIds);
+        }
     }
 }
 
