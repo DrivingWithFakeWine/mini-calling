@@ -1,0 +1,19 @@
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  level:
+    org.springframework.security: WARN
+
+jwt:
+  secret: test-only-jwt-secret-for-integration-tests-0123456789  # 32+ 字节，明摆着的测试假值
+  expiration-ms: 3600000git
+
+

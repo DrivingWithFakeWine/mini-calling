@@ -104,5 +104,15 @@ public class UserServiceImpl implements UserService {
             userMapper.batchInsertUserRoles(userId, roleIds);
         }
     }
+
+    @Override
+    public SysUser getUserByUsername(String username) {
+        SysUser user = userMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        return user;
+    }
 }
 
