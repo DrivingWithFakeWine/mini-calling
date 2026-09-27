@@ -91,7 +91,6 @@ INSERT INTO `sys_role_permission` VALUES (1, 7);
 INSERT INTO `sys_role_permission` VALUES (1, 8);
 INSERT INTO `sys_role_permission` VALUES (1, 9);
 INSERT INTO `sys_role_permission` VALUES (1, 10);
-INSERT INTO `sys_role_permission` VALUES (2, 1);
 INSERT INTO `sys_role_permission` VALUES (5, 1);
 INSERT INTO `sys_role_permission` VALUES (5, 9);
 

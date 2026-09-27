@@ -52,6 +52,18 @@ class RoleServiceTest extends BaseIntegrationTest {
     }
 
     @Test
+    @DisplayName("角色编码重复时抛 BusinessException")
+    void createRole_duplicateCode_throws() {
+        RoleCreateRequest req = new RoleCreateRequest();
+        req.setCode("admin");        // 种子数据里已存在
+        req.setName("重复编码");
+
+        assertThatThrownBy(() -> roleService.createRole(req))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("角色编码已存在");
+    }
+
+    @Test
     @DisplayName("编辑角色：先删后插，权限绑定被完全替换")
     void updateRole_replacesPermissions() {
         RoleCreateRequest create = new RoleCreateRequest();
