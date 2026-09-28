@@ -1,0 +1,30 @@
+services:
+
+  # ──────── ① 你的应用 ────────
+  app:
+    build: .                        # 用当前目录的 Dockerfile 构建镜像
+    ports:
+      - "8080:8080"                 # 宿主机端口:容器端口
+    environment:                    # 注入给应用的连接信息
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/mini_calling?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: rootpass
+    depends_on:
+      - mysql
+
+  # ──────── ② 数据库 ────────
+  mysql:
+    image: mysql:8.0                # 直接用现成的 MySQL 镜像
+    environment:                    # 给 MySQL 的初始化指令
+      MYSQL_ROOT_PASSWORD: rootpass # root 密码设成这个
+      MYSQL_DATABASE: mini_calling     # 启动时自动建这个库
+    ports:
+      - "3307:3306"     # 本地端口 : 容器里mysql端口
+    volumes:                        # 这个容器的"挂载清单"
+      - mysql-data:/var/lib/mysql   #   挂载点 a：数据存到卷里（持久化）
+      - ./src/test/resources/sql/init_test_schema.sql:/docker-entrypoint-initdb.d/init.sql
+      #   挂载点 b：你电脑上的建表 SQL → 放进自动初始化目录
+
+# ──────── ③ 卷登记处 ────────
+volumes:
+  mysql-data:                       # 给上面用到的卷"上户口"，名字随便起

@@ -136,7 +136,7 @@
                 <version>${spring-boot.version}</version>
                 <configuration>
                     <mainClass>com.dking.mini_calling.MiniCallingApplication</mainClass>
-                    <skip>true</skip>
+                    <skip>false</skip>
                 </configuration>
                 <executions>
                     <execution>
