@@ -56,4 +56,14 @@ springdoc:
     tags-sorter: alpha
     try-it-out-enabled: true    # 启用 Try it out 调试按钮
 
+# ──────── AI Agent 模块（Phase 0 起步） ────────
+agent:
+  base-url: https://open.bigmodel.cn/api/paas/v4   # 智谱 OpenAI 兼容端点（代码里拼 /chat/completions）
+  api-key: ${ZHIPU_API_KEY:dummy-key}              # 真实 key 走环境变量注入，别提交进 git
+  model: glm-4.6
+  temperature: 0.6
+  thinking-disabled: true                          # glm-4.6 默认深度思考，管理问答用不上，关掉换首字速度
+  connect-timeout-ms: 5000
+  read-timeout-ms: 120000                          # LLM 生成慢，读超时必须放大（RestClient 默认无限等）
+
 
