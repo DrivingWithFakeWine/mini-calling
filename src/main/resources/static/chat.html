@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>mini_calling AI 助手</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei", sans-serif; background: #f4f6f8; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #1f2d3d; color: #fff; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
+  header .user { font-size: 13px; opacity: .8; }
+  #loginBar { background: #fff; padding: 10px 20px; border-bottom: 1px solid #e5e9ef; display: flex; gap: 8px; }
+  #loginBar input { padding: 6px 10px; border: 1px solid #d5dbe3; border-radius: 4px; width: 160px; }
+  #loginBar button { padding: 6px 18px; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 70%; padding: 10px 14px; border-radius: 10px; white-space: pre-wrap; line-height: 1.6; }
+  .msg.user { align-self: flex-end; background: #3b82f6; color: #fff; border-bottom-right-radius: 2px; }
+  .msg.ai { align-self: flex-start; background: #fff; border: 1px solid #e5e9ef; border-bottom-left-radius: 2px; }
+  .msg.err { align-self: center; background: #fef2f2; color: #b91c1c; font-size: 13px; }
+  footer { display: flex; gap: 8px; padding: 14px 20px; background: #fff; border-top: 1px solid #e5e9ef; }
+  footer input { flex: 1; padding: 10px 14px; border: 1px solid #d5dbe3; border-radius: 6px; }
+  footer button { padding: 10px 26px; border: none; background: #3b82f6; color: #fff; border-radius: 6px; cursor: pointer; }
+  footer button:disabled { background: #9db9e8; cursor: not-allowed; }
+</style>
+</head>
+<body>
+
+<header>
+  <b>🤖 mini_calling AI 助手</b>
+  <span class="user" id="whoami"></span>
+</header>
+
+<!-- 登录条：浏览器导航带不了 JWT，所以页面里自己调 /auth/login 换 token -->
+<div id="loginBar">
+  <input id="username" placeholder="用户名">
+  <input id="password" type="password" placeholder="密码">
+  <button onclick="login()">登录</button>
+</div>
+
+<div id="chat"></div>
+
+<footer>
+  <input id="input" placeholder="例如：帮我看看有哪些用户…（回车发送）" onkeydown="if(event.key==='Enter')send()">
+  <button id="sendBtn" onclick="send()">发送</button>
+</footer>
+
+<script>
+  // token 与会话 id 存内存：token 顺便放 localStorage，刷新页面免重登
+  let token = localStorage.getItem('agent_token') || '';
+  let sessionId = null;
+
+  const chat = document.getElementById('chat');
+
+  if (token) { toggleLogin(false); }
+
+  function toggleLogin(loggedOut) {
+    document.getElementById('loginBar').style.display = loggedOut ? 'flex' : 'none';
+    document.getElementById('whoami').textContent = loggedOut ? '未登录' : '已登录';
+  }
+
+  function addMsg(text, cls) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  async function login() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const res = await fetch('/auth/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password})
+    });
+    const body = await res.json();
+    if (body.code !== 200) { alert('登录失败：' + body.message); return; }
+    token = body.data.token;
+    localStorage.setItem('agent_token', token);
+    sessionId = null;                       // 换账号重新开始会话
+    toggleLogin(false);
+    addMsg('登录成功，开始提问吧～', 'ai');
+  }
+
+  async function send() {
+    const input = document.getElementById('input');
+    const text = input.value.trim();
+    if (!text) return;
+    addMsg(text, 'user');
+    input.value = '';
+    const btn = document.getElementById('sendBtn');
+    btn.disabled = true;
+    const waiting = addMsg('思考中…', 'ai');
+
+    try {
+      const res = await fetch('/agent/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+        body: JSON.stringify({message: text, sessionId: sessionId})
+      });
+      waiting.remove();
+
+      // 401 时 Security 返回的是 JSON 而不是 SSE/流，统一按 Result 结构解析
+      if (res.status === 401) { toggleLogin(true); addMsg('登录已过期，请重新登录', 'err'); return; }
+      const body = await res.json();
+      if (body.code !== 200) { addMsg('出错了：' + body.message, 'err'); return; }
+
+      sessionId = body.data.sessionId;      // 首轮拿到的会话 id，之后每轮带回
+      addMsg(body.data.reply, 'ai');
+    } catch (e) {
+      waiting.remove();
+      addMsg('网络异常：' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+      input.focus();
+    }
+  }
+</script>
+</body>
+</html>

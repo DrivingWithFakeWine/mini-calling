@@ -28,4 +28,10 @@ public class AgentProperties {
 
     /** LLM 生成慢，读超时必须远大于普通接口 */
     private long readTimeoutMs = 120000;
+
+    /** 每个会话最多保留多少条消息，超限丢最旧（朴素截断；按 token 计数淘汰是进阶话题） */
+    private int historyLimit = 20;
+
+    /** 会话空闲多久后清理（分钟），防止内存无限增长 */
+    private long sessionTtlMinutes = 30;
 }

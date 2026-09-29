@@ -46,6 +46,9 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/auth/login", "/error").permitAll()
+                        // 聊天页面本身放行：浏览器直接导航带不了 JWT 头，页面没有敏感数据，
+                        // 真正的对话接口 /agent/** 仍是 authenticated，数据安全不受影响
+                        .requestMatchers("/chat.html").permitAll()
                         // ↓↓↓ 新增：放行 swagger 相关路径 ↓↓↓
                         .requestMatchers(
                                 "/swagger-ui/**",

@@ -65,5 +65,7 @@ agent:
   thinking-disabled: true                          # glm-4.6 默认深度思考，管理问答用不上，关掉换首字速度
   connect-timeout-ms: 5000
   read-timeout-ms: 120000                          # LLM 生成慢，读超时必须放大（RestClient 默认无限等）
+  history-limit: 20                                # 每会话最多保留的消息条数，超限丢最旧
+  session-ttl-minutes: 30                          # 会话空闲多久后清理
 
 
