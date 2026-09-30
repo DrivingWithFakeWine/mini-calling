@@ -16,6 +16,7 @@
   .msg.user { align-self: flex-end; background: #3b82f6; color: #fff; border-bottom-right-radius: 2px; }
   .msg.ai { align-self: flex-start; background: #fff; border: 1px solid #e5e9ef; border-bottom-left-radius: 2px; }
   .msg.err { align-self: center; background: #fef2f2; color: #b91c1c; font-size: 13px; }
+  .msg.trace { align-self: flex-start; background: #eef2ff; color: #4b5563; font-size: 12px; padding: 6px 10px; font-family: Consolas, monospace; }
   footer { display: flex; gap: 8px; padding: 14px 20px; background: #fff; border-top: 1px solid #e5e9ef; }
   footer input { flex: 1; padding: 10px 14px; border: 1px solid #d5dbe3; border-radius: 6px; }
   footer button { padding: 10px 26px; border: none; background: #3b82f6; color: #fff; border-radius: 6px; cursor: pointer; }
@@ -106,6 +107,12 @@
       if (body.code !== 200) { addMsg('出错了：' + body.message, 'err'); return; }
 
       sessionId = body.data.sessionId;      // 首轮拿到的会话 id，之后每轮带回
+      // 工具调用轨迹：AI 回答前先展示"它动了什么工具"，agent 的过程透明化
+      if (body.data.toolTraces && body.data.toolTraces.length) {
+        for (const t of body.data.toolTraces) {
+          addMsg('🔧 ' + t.tool + '(' + (t.arguments || '{}') + ') → ' + t.resultSummary, 'trace');
+        }
+      }
       addMsg(body.data.reply, 'ai');
     } catch (e) {
       waiting.remove();

@@ -6,6 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -72,5 +74,22 @@ class ChatMemoryStoreTest {
 
         assertThat(store.exists(sid)).isFalse();
         assertThat(store.history(sid)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("正例：截断切在工具链中间时，丢掉头部孤儿 tool 消息（协议要求 tool 紧跟 assistant(tool_calls)）")
+    void truncation_never_leaves_orphan_tool() {
+        props.setHistoryLimit(2);
+        String sid = store.create(1L);
+        store.append(sid,
+                ChatMessage.user("u1"),
+                ChatMessage.assistant("调工具中", List.of()),
+                ChatMessage.tool("c1", "{\"ok\":true}"),
+                ChatMessage.assistant("final", null));
+
+        var history = store.history(sid);
+
+        assertThat(history.get(0).role()).isNotEqualTo("tool");
+        assertThat(history.get(history.size() - 1).content()).isEqualTo("final");
     }
 }

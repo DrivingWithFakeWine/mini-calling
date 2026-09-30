@@ -67,5 +67,6 @@ agent:
   read-timeout-ms: 120000                          # LLM 生成慢，读超时必须放大（RestClient 默认无限等）
   history-limit: 20                                # 每会话最多保留的消息条数，超限丢最旧
   session-ttl-minutes: 30                          # 会话空闲多久后清理
+  max-rounds: 8                                    # agent 循环最大轮数，防模型无限打转
 
 

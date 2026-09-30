@@ -67,6 +67,11 @@ public class ChatMemoryStore {
         while (list.size() > props.getHistoryLimit()) {
             list.remove(0);
         }
+        // 协议要求 tool 消息必须紧跟在带 tool_calls 的 assistant 之后：
+        // 截断可能正好切在中间，把暴露在数组头部的"孤儿 tool 消息"也丢掉，避免下次请求被上游拒绝
+        while (!list.isEmpty() && "tool".equals(list.get(0).role())) {
+            list.remove(0);
+        }
     }
 
     /** 每分钟清理一次空闲超 TTL 的会话（TTL=0 意为立即全部过期，测试用） */

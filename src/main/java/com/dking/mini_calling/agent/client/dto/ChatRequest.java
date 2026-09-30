@@ -13,13 +13,19 @@ import java.util.List;
 public record ChatRequest(
         String model,
         List<ChatMessage> messages,
+        List<ToolDefinition> tools,
         Double temperature,
         Thinking thinking) {
 
     public static ChatRequest of(AgentProperties props, List<ChatMessage> messages) {
+        return of(props, messages, null);
+    }
+
+    public static ChatRequest of(AgentProperties props, List<ChatMessage> messages, List<ToolDefinition> tools) {
         return new ChatRequest(
                 props.getModel(),
                 messages,
+                tools,
                 props.getTemperature(),
                 props.isThinkingDisabled() ? Thinking.DISABLED : Thinking.ENABLED);
     }

@@ -34,4 +34,7 @@ public class AgentProperties {
 
     /** 会话空闲多久后清理（分钟），防止内存无限增长 */
     private long sessionTtlMinutes = 30;
+
+    /** agent 循环的最大轮数：模型反复点名工具不停手时强制止血 */
+    private int maxRounds = 8;
 }
