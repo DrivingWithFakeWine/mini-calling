@@ -8,6 +8,8 @@
   body { font-family: "Microsoft YaHei", sans-serif; background: #f4f6f8; height: 100vh; display: flex; flex-direction: column; }
   header { background: #1f2d3d; color: #fff; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; }
   header .user { font-size: 13px; opacity: .8; }
+  header button { background: #3b4a5f; color: #fff; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  header button:hover { background: #4a5d78; }
   #loginBar { background: #fff; padding: 10px 20px; border-bottom: 1px solid #e5e9ef; display: flex; gap: 8px; }
   #loginBar input { padding: 6px 10px; border: 1px solid #d5dbe3; border-radius: 4px; width: 160px; }
   #loginBar button { padding: 6px 18px; }
@@ -27,7 +29,10 @@
 
 <header>
   <b>🤖 mini_calling AI 助手</b>
-  <span class="user" id="whoami"></span>
+  <span style="display:flex; align-items:center; gap:12px;">
+    <span class="user" id="whoami"></span>
+    <button onclick="logout()">退出登录</button>
+  </span>
 </header>
 
 <!-- 登录条：浏览器导航带不了 JWT，所以页面里自己调 /auth/login 换 token -->
@@ -51,12 +56,37 @@
 
   const chat = document.getElementById('chat');
 
-  if (token) { toggleLogin(false); }
+  refreshMe();   // 页面加载时校验本地 token：有效则直接进入聊天，失效则回登录态
 
   function toggleLogin(loggedOut) {
     document.getElementById('loginBar').style.display = loggedOut ? 'flex' : 'none';
-    document.getElementById('whoami').textContent = loggedOut ? '未登录' : '已登录';
   }
+
+  // 用 /auth/me 校验 token 并展示真实用户名；401 = token 过期，清理回登录态
+  async function refreshMe() {
+    if (!token) { toggleLogin(true); return; }
+    try {
+      const res = await fetch('/auth/me', { headers: { 'Authorization': 'Bearer ' + token } });
+      if (res.status === 401) { doLogout(false); return; }
+      const body = await res.json();
+      const nick = body.data.nickname ? '（' + body.data.nickname + '）' : '';
+      document.getElementById('whoami').textContent = '已登录：' + body.data.username + nick;
+      toggleLogin(false);
+    } catch (e) {
+      toggleLogin(true);
+    }
+  }
+
+  function doLogout(clearChat) {
+    token = '';
+    sessionId = null;
+    localStorage.removeItem('agent_token');
+    document.getElementById('whoami').textContent = '未登录';
+    toggleLogin(true);
+    if (clearChat) chat.innerHTML = '';
+  }
+
+  function logout() { doLogout(true); }
 
   function addMsg(text, cls) {
     const div = document.createElement('div');
@@ -79,7 +109,8 @@
     token = body.data.token;
     localStorage.setItem('agent_token', token);
     sessionId = null;                       // 换账号重新开始会话
-    toggleLogin(false);
+    chat.innerHTML = '';                    // 清掉上一账号的聊天记录
+    await refreshMe();
     addMsg('登录成功，开始提问吧～', 'ai');
   }
 
@@ -93,29 +124,71 @@
     btn.disabled = true;
     const waiting = addMsg('思考中…', 'ai');
 
+    // 事件驱动的渲染：首个 delta 到达时才创建 AI 气泡，之后逐段追加（打字机效果）
+    let aiBubble = null;
+    let reply = '';
+    let currentEvent = null;
+    let traceCard = null;
+
+    const handle = (ev, data) => {
+      if (ev === 'start') {
+        sessionId = data.sessionId;                          // 会话 id 在首个事件就到手
+      } else if (ev === 'delta') {
+        if (!aiBubble) { waiting.remove(); aiBubble = addMsg('', 'ai'); }
+        reply += data.text;
+        aiBubble.textContent = reply;
+        chat.scrollTop = chat.scrollHeight;
+      } else if (ev === 'tool') {
+        waiting.remove();
+        traceCard = addMsg('🔧 ' + data.tool + '(' + (data.arguments || '{}') + ') 执行中…', 'trace');
+      } else if (ev === 'tool_result') {
+        if (traceCard) traceCard.textContent = traceCard.textContent.replace(' 执行中…', ' → ' + data.result);
+      } else if (ev === 'error') {
+        waiting.remove();
+        addMsg('出错：' + data.message, 'err');
+      }
+    };
+
     try {
-      const res = await fetch('/agent/chat', {
+      const res = await fetch('/agent/chat/stream', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'Accept': 'text/event-stream'},
         body: JSON.stringify({message: text, sessionId: sessionId})
       });
-      waiting.remove();
 
-      // 401 时 Security 返回的是 JSON 而不是 SSE/流，统一按 Result 结构解析
-      if (res.status === 401) { toggleLogin(true); addMsg('登录已过期，请重新登录', 'err'); return; }
-      const body = await res.json();
-      if (body.code !== 200) { addMsg('出错了：' + body.message, 'err'); return; }
+      // 401 时 Security 返回的是 JSON 而不是事件流
+      if (res.status === 401) { doLogout(false); addMsg('登录已过期，请重新登录', 'err'); return; }
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        waiting.remove();
+        addMsg('出错了：' + (body.message || res.status), 'err');
+        return;
+      }
 
-      sessionId = body.data.sessionId;      // 首轮拿到的会话 id，之后每轮带回
-      // 工具调用轨迹：AI 回答前先展示"它动了什么工具"，agent 的过程透明化
-      if (body.data.toolTraces && body.data.toolTraces.length) {
-        for (const t of body.data.toolTraces) {
-          addMsg('🔧 ' + t.tool + '(' + (t.arguments || '{}') + ') → ' + t.resultSummary, 'trace');
+      // 手写 SSE 行协议解析：event: 行记事件名，data: 行取载荷并触发处理
+      // （EventSource 不能带 JWT 请求头，所以我们用 fetch + ReadableStream）
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {stream: true});
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (line.startsWith('event:')) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith('data:')) {
+            try { handle(currentEvent, JSON.parse(line.slice(5).trim())); } catch (e) { /* 忽略坏行 */ }
+            currentEvent = null;
+          }
         }
       }
-      addMsg(body.data.reply, 'ai');
+      if (!aiBubble && waiting.parentNode) waiting.remove();   // 流结束仍无内容：收掉占位
     } catch (e) {
-      waiting.remove();
+      if (waiting.parentNode) waiting.remove();
       addMsg('网络异常：' + e.message, 'err');
     } finally {
       btn.disabled = false;

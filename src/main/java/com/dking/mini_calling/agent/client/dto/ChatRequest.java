@@ -15,19 +15,32 @@ public record ChatRequest(
         List<ChatMessage> messages,
         List<ToolDefinition> tools,
         Double temperature,
-        Thinking thinking) {
+        Thinking thinking,
+        Boolean stream) {
 
     public static ChatRequest of(AgentProperties props, List<ChatMessage> messages) {
         return of(props, messages, null);
     }
 
+    /** 非流式请求：stream 字段省略（服务端默认按非流式处理） */
     public static ChatRequest of(AgentProperties props, List<ChatMessage> messages, List<ToolDefinition> tools) {
+        return build(props, messages, tools, false);
+    }
+
+    /** 流式请求：必须显式 stream=true——是否走 SSE 由请求体决定，Accept 头只是偏好表达 */
+    public static ChatRequest streaming(AgentProperties props, List<ChatMessage> messages, List<ToolDefinition> tools) {
+        return build(props, messages, tools, true);
+    }
+
+    private static ChatRequest build(AgentProperties props, List<ChatMessage> messages,
+                                     List<ToolDefinition> tools, boolean stream) {
         return new ChatRequest(
                 props.getModel(),
                 messages,
                 tools,
                 props.getTemperature(),
-                props.isThinkingDisabled() ? Thinking.DISABLED : Thinking.ENABLED);
+                props.isThinkingDisabled() ? Thinking.DISABLED : Thinking.ENABLED,
+                stream);
     }
 
     /** 智谱扩展参数（非 OpenAI 规范）：glm-4.6 默认开启深度思考，管理问答场景关闭可明显降低延迟 */

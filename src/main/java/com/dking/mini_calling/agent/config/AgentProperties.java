@@ -37,4 +37,7 @@ public class AgentProperties {
 
     /** agent 循环的最大轮数：模型反复点名工具不停手时强制止血 */
     private int maxRounds = 8;
+
+    /** SSE 长连接超时（毫秒）：流式对话超过此时长无推送则断开 */
+    private long streamTimeoutMs = 120000;
 }

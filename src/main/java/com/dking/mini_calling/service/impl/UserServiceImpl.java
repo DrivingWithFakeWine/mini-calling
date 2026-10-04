@@ -40,7 +40,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void createUser(UserCreateRequest req) {
+    public Long createUser(UserCreateRequest req) {
         Long count = userMapper.selectCount(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, req.getUsername()));
         if (count > 0) {
@@ -59,6 +59,7 @@ public class UserServiceImpl implements UserService {
                 userMapper.insertUserRole(user.getId(), roleId);
             }
         }
+        return user.getId();   // MP insert 后主键已回填
     }
 
     @Override
@@ -106,6 +107,16 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public void setEnabled(Long userId, boolean enabled) {
+        SysUser user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        user.setEnabled(enabled ? 1 : 0);
+        userMapper.updateById(user);
+    }
+
+    @Override
     public SysUser getUserByUsername(String username) {
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username));
@@ -113,6 +124,11 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("用户不存在");
         }
         return user;
+    }
+
+    @Override
+    public SysUser getUserById(Long id) {
+        return userMapper.selectById(id);   // 逻辑删除的查不到，返回 null
     }
 }
 

@@ -87,6 +87,13 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Phase 4：模拟智谱 SSE 流式响应用。必须 standalone 版（自带 Jetty12），避免与 Boot 3.5 的 Jetty 冲突 -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.13.1</version>
+            <scope>test</scope>
+        </dependency>
         <!-- 让 Spring Boot 自动发现容器并注入连接信息 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

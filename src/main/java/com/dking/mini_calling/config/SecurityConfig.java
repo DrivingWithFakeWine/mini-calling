@@ -3,6 +3,7 @@ package com.dking.mini_calling.config;
 import com.dking.mini_calling.common.Result;
 import com.dking.mini_calling.filter.JwtAuthenticationFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -59,6 +60,10 @@ public class SecurityConfig {
                                 "/webjars/**"
                         ).permitAll()
                         // ↑↑↑ 新增结束 ↑↑↑
+                        // Phase 4：SSE 收尾会触发 ASYNC/ERROR 二次分发，而分发线程上没有登录上下文，
+                        // 不放行的话 AuthorizationFilter 会在连接完成时抛 Access Denied 掐断前端。
+                        // 真实鉴权仍发生在原始 REQUEST 分发（anyRequest().authenticated()），语义不变
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                         .anyRequest().authenticated())
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))

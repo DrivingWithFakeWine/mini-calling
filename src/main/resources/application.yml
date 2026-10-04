@@ -68,5 +68,6 @@ agent:
   history-limit: 20                                # 每会话最多保留的消息条数，超限丢最旧
   session-ttl-minutes: 30                          # 会话空闲多久后清理
   max-rounds: 8                                    # agent 循环最大轮数，防模型无限打转
+  stream-timeout-ms: 120000                        # SSE 长连接超时
 
 

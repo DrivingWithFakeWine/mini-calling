@@ -1,6 +1,7 @@
 package com.dking.mini_calling.agent.loop;
 
 import com.dking.mini_calling.agent.client.LlmClient;
+import com.dking.mini_calling.agent.client.StreamCollector;
 import com.dking.mini_calling.agent.client.dto.ChatMessage;
 import com.dking.mini_calling.agent.client.dto.ChatRequest;
 import com.dking.mini_calling.agent.client.dto.ChatResponse;
@@ -15,6 +16,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 手写的 function calling 循环——整个 agent 模块的心脏（目标 ≤80 行，每一行都值得读懂）。
@@ -45,11 +47,34 @@ public class AgentLoop {
      * （调用方据此把完整时间线写入会话记忆）
      */
     public LoopResult run(List<ChatMessage> messages, ToolContext ctx) {
+        return run(messages, ctx, null);
+    }
+
+    /**
+     * Phase 4：sink 非 null 时走流式 LLM 调用，把文本增量/工具过程实时交给回调；
+     * sink 为 null 时行为与之前完全一致。同一个循环体两种输出——不复制逻辑
+     */
+    public LoopResult run(List<ChatMessage> messages, ToolContext ctx, Consumer<AgentEvent> sink) {
+        boolean streaming = sink != null;
         List<ToolTrace> traces = new ArrayList<>();
         List<ToolDefinition> tools = toolRegistry.definitions();
 
         for (int round = 1; round <= props.getMaxRounds(); round++) {
-            ChatResponse resp = llmClient.chat(ChatRequest.of(props, messages, tools));
+            ChatResponse resp;
+            if (streaming) {
+                StreamCollector collector = new StreamCollector();
+                llmClient.chatStream(ChatRequest.streaming(props, messages, tools), chunk -> {
+                    collector.accept(chunk);
+                    String text = chunk.deltaText();
+                    if (StringUtils.hasText(text)) {
+                        sink.accept(AgentEvent.delta(text));   // 文本增量实时外送
+                    }
+                });
+                resp = collector.toResponse();   // 聚合回非流式形状，下面的逻辑不分支
+            } else {
+                resp = llmClient.chat(ChatRequest.of(props, messages, tools));
+            }
+            // 到这里，流式 或 原始 形式 都变成resp，没有区别。
             ChatMessage assistant = resp.choices().get(0).message();
 
             // 铁律①
@@ -68,8 +93,14 @@ public class AgentLoop {
                 ToolCall call = assistant.toolCalls().get(i);
                 // 智谱的 tool_call.id 偶发为空：本地补占位，保持"每个 tool 消息都有 id"的协议闭合
                 String callId = StringUtils.hasText(call.id()) ? call.id() : "call_" + round + "_" + i;
+                if (streaming) {
+                    sink.accept(AgentEvent.tool(call.function().name(), call.function().arguments()));
+                }
                 String resultJson = toolRegistry.invoke(call.function().name(), call.function().arguments(), ctx);
                 traces.add(new ToolTrace(call.function().name(), call.function().arguments(), summarize(resultJson)));
+                if (streaming) {
+                    sink.accept(AgentEvent.toolResult(call.function().name(), summarize(resultJson)));
+                }
                 // 铁律③
                 messages.add(ChatMessage.tool(callId, resultJson));
             }

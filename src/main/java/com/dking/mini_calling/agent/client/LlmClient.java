@@ -1,5 +1,6 @@
 package com.dking.mini_calling.agent.client;
 
+import com.dking.mini_calling.agent.client.dto.ChatChunk;
 import com.dking.mini_calling.agent.client.dto.ChatRequest;
 import com.dking.mini_calling.agent.client.dto.ChatResponse;
 import com.dking.mini_calling.agent.config.AgentProperties;
@@ -15,6 +16,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.function.Consumer;
 
 /**
  * LLM 客户端：对 OpenAI 兼容 HTTP 接口的薄封装
@@ -79,8 +88,56 @@ public class LlmClient {
         return response;
     }
 
+    /**
+     * 流式对话：每收到一个分片回调一次 onChunk；聚合职责在调用方（StreamCollector）。
+     * SSE 行协议解析在这里：data: {...} 为载荷，data: [DONE] 结束
+     */
+    public void chatStream(ChatRequest request, Consumer<ChatChunk> onChunk) {
+        try {
+            restClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.TEXT_EVENT_STREAM)
+                    .body(request)
+                    .exchange((req, res) -> {
+                        if (res.getStatusCode().isError()) {
+                            String body = new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8);
+                            throw translate(res.getStatusCode().value(), body);
+                        }
+                        readSseLines(res.getBody(), onChunk);
+                        return null;
+                    });
+        } catch (HttpStatusCodeException e) {
+            throw translateHttpError(e);
+        } catch (ResourceAccessException | UncheckedIOException e) {
+            // 流中途断网/读超时也走同一句人话
+            throw new BusinessException("调用大模型接口超时或网络异常，请稍后重试");
+        }
+    }
+
+    private void readSseLines(InputStream body, Consumer<ChatChunk> onChunk) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data:")) {
+                    continue;   // 忽略空行、注释行等非载荷
+                }
+                String payload = line.substring(5).trim();
+                if ("[DONE]".equals(payload)) {
+                    return;
+                }
+                if (!payload.isEmpty()) {
+                    onChunk.accept(objectMapper.readValue(payload, ChatChunk.class));
+                }
+            }
+        }
+    }
+
     private BusinessException translateHttpError(HttpStatusCodeException e) {
-        int status = e.getStatusCode().value();
+        return translate(e.getStatusCode().value(), e.getResponseBodyAsString());
+    }
+
+    private BusinessException translate(int status, String body) {
         if (status == 401 || status == 403) {
             return new BusinessException("LLM API Key 无效或未授权，请检查 ZHIPU_API_KEY 配置");
         }
@@ -88,7 +145,7 @@ public class LlmClient {
             return new BusinessException("LLM 调用频率超限，请稍后重试");
         }
         // 智谱错误体形如 {"error":{"code":"1211","message":"您的模型名称不正确..."}}
-        String detail = extractUpstreamMessage(e.getResponseBodyAsString());
+        String detail = extractUpstreamMessage(body);
         return new BusinessException("LLM 调用失败(HTTP " + status + ")" + (detail == null ? "" : "：" + detail));
     }
 

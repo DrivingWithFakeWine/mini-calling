@@ -55,7 +55,7 @@ public class RoleServiceImpl implements RoleService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void createRole(RoleCreateRequest req) {
+    public Long createRole(RoleCreateRequest req) {
         Long count = roleMapper.selectCount(
                 new LambdaQueryWrapper<SysRole>().eq(SysRole::getCode, req.getCode()));
         if (count > 0) {
@@ -70,6 +70,7 @@ public class RoleServiceImpl implements RoleService {
         if (req.getPermissionIds() != null && !req.getPermissionIds().isEmpty()) {
             roleMapper.batchInsertRolePermission(role.getId(), req.getPermissionIds());
         }
+        return role.getId();
     }
 
     @Override

@@ -76,14 +76,14 @@ class AgentServiceTest {
     @Test
     @DisplayName("正例-首轮：sessionId 为空时创建会话，循环收到 system+user 两条消息")
     void firstRound_createsSession() {
-        when(agentLoop.run(any(), any())).thenAnswer(inv -> replyIntoTimeline(inv, "你好，管理员"));
+        when(agentLoop.run(any(), any(), any())).thenAnswer(inv -> replyIntoTimeline(inv, "你好，管理员"));
 
         ChatWebResponse out = service.chat(admin(), new ChatWebRequest("你好", null));
 
         assertThat(out.sessionId()).startsWith("1-");   // userId 前缀
         assertThat(out.toolTraces()).isEmpty();
         var captor = listCaptor();
-        verify(agentLoop).run(captor.capture(), any());
+        verify(agentLoop).run(captor.capture(), any(), any());
         // captor 抓的是同一个列表引用，事后看到的是 mock 追加回答后的最终态：system + user + assistant
         var messages = captor.getValue();
         assertThat(messages).hasSize(3);
@@ -95,7 +95,7 @@ class AgentServiceTest {
     @Test
     @DisplayName("正例-第二轮：传给循环的消息数组携带第一轮的 user+assistant，共 4 条")
     void secondRound_carriesHistory() {
-        when(agentLoop.run(any(), any()))
+        when(agentLoop.run(any(), any(), any()))
                 .thenAnswer(inv -> replyIntoTimeline(inv, "你好，我是助手"))
                 .thenAnswer(inv -> replyIntoTimeline(inv, "你叫小明"));
 
@@ -103,7 +103,7 @@ class AgentServiceTest {
         service.chat(admin(), new ChatWebRequest("我叫什么", first.sessionId()));
 
         var captor = listCaptor();
-        verify(agentLoop, times(2)).run(captor.capture(), any());
+        verify(agentLoop, times(2)).run(captor.capture(), any(), any());
 
         // 每次调用各自 new 列表，最终态：第一份 = system+user+assistant(3)，第二份 = 带全历史的 5 条
         assertThat(captor.getAllValues().get(0)).hasSize(3);
@@ -129,12 +129,12 @@ class AgentServiceTest {
     @Test
     @DisplayName("正例：服务重启后拿旧 sessionId 进来（归属正确但已不存在）→ 优雅重建继续对话")
     void unknownOwnedSession_rebuiltGracefully() {
-        when(agentLoop.run(any(), any())).thenReturn(result("还在呢"));
+        when(agentLoop.run(any(), any(), any())).thenAnswer(inv -> replyIntoTimeline(inv, "还在呢"));
 
         ChatWebResponse out = service.chat(admin(), new ChatWebRequest("hi", "1-ghost"));
 
         assertThat(out.sessionId()).isEqualTo("1-ghost");   // 保持原 id，客户端无感
         assertThat(memoryStore.exists("1-ghost")).isTrue(); // 重建后记忆恢复工作
-        verify(agentLoop).run(any(), any());
+        verify(agentLoop).run(any(), any(), any());
     }
 }

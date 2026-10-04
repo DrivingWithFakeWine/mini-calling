@@ -1,6 +1,8 @@
 package com.dking.mini_calling.agent.loop;
 
 import com.dking.mini_calling.agent.client.LlmClient;
+import com.dking.mini_calling.agent.client.StreamCollector;
+import com.dking.mini_calling.agent.client.dto.ChatChunk;
 import com.dking.mini_calling.agent.client.dto.ChatMessage;
 import com.dking.mini_calling.agent.client.dto.ChatRequest;
 import com.dking.mini_calling.agent.client.dto.ChatResponse;
@@ -17,10 +19,13 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -64,6 +69,18 @@ class AgentLoopTest {
         messages.add(ChatMessage.user(userText));
         loop.run(messages, ctx);
         return messages;
+    }
+
+    // ─── 流式测试辅助 ───
+
+    private ChatChunk chunkText(String text) {
+        return new ChatChunk(List.of(new ChatChunk.Choice(new ChatChunk.Delta(text, null), null)), null);
+    }
+
+    private ChatChunk chunkTool(String id, String name) {
+        return new ChatChunk(List.of(new ChatChunk.Choice(new ChatChunk.Delta(null,
+                List.of(new ChatChunk.DeltaToolCall(0, id, "function",
+                        new ChatChunk.DeltaToolCall.Function(name, "{}")))), null)), null);
     }
 
     @Test
@@ -187,5 +204,47 @@ class AgentLoopTest {
         AgentLoop.LoopResult result = loop.run(new ArrayList<>(List.of(ChatMessage.user("讲个长故事"))), ctx);
 
         assertThat(result.reply()).contains("截断");
+    }
+
+    @Test
+    @DisplayName("正例（流式）：chatStream 分片推送 → sink 收到 delta 事件，聚合回答与非流式一致")
+    void streamingLoop_emitsDeltaEvents() {
+        doAnswer(inv -> {
+            Consumer<ChatChunk> onChunk = inv.getArgument(1);
+            onChunk.accept(chunkText("你"));
+            onChunk.accept(chunkText("好"));
+            return null;
+        }).when(llmClient).chatStream(any(), any());
+        when(llmClient.chat(any())).thenReturn(textResp("不应被调用", "stop"));   // 防呆
+
+        List<AgentEvent> events = new ArrayList<>();
+        AgentLoop.LoopResult result = loop.run(
+                new ArrayList<>(List.of(ChatMessage.user("你好"))), ctx, events::add);
+
+        assertThat(result.reply()).isEqualTo("你好");
+        assertThat(events).extracting(AgentEvent::type).containsExactly("delta", "delta");
+        verify(llmClient, times(1)).chatStream(any(), any());
+        verify(llmClient, never()).chat(any());
+    }
+
+    @Test
+    @DisplayName("正例（流式）：工具链路 → sink 依次收到 tool、tool_result、delta 事件")
+    void streamingLoop_toolEvents() {
+        doAnswer(inv -> {
+            Consumer<ChatChunk> onChunk = inv.getArgument(1);
+            onChunk.accept(chunkTool("c1", "get_current_time"));
+            return null;
+        }).doAnswer(inv -> {
+            Consumer<ChatChunk> onChunk = inv.getArgument(1);
+            onChunk.accept(chunkText("现在是 12:00"));
+            return null;
+        }).when(llmClient).chatStream(any(), any());
+
+        List<AgentEvent> events = new ArrayList<>();
+        AgentLoop.LoopResult result = loop.run(
+                new ArrayList<>(List.of(ChatMessage.user("几点了"))), ctx, events::add);
+
+        assertThat(result.reply()).isEqualTo("现在是 12:00");
+        assertThat(events).extracting(AgentEvent::type).containsExactly("tool", "tool_result", "delta");
     }
 }
