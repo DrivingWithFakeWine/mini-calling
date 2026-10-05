@@ -1,9 +1,11 @@
 package com.dking.mini_calling.agent.web;
 
 import com.dking.mini_calling.agent.config.AgentProperties;
+import com.dking.mini_calling.agent.confirm.PendingActionStore;
 import com.dking.mini_calling.agent.service.AgentService;
 import com.dking.mini_calling.agent.web.dto.ChatWebRequest;
 import com.dking.mini_calling.agent.web.dto.ChatWebResponse;
+import com.dking.mini_calling.agent.web.dto.ConfirmWebRequest;
 import com.dking.mini_calling.common.IgnoreWrap;
 import com.dking.mini_calling.security.LoginUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,6 +40,7 @@ public class AgentController {
     private final AgentProperties agentProperties;
     private final ThreadPoolTaskExecutor agentExecutor;
     private final ObjectMapper objectMapper;
+    private final PendingActionStore actionStore;
 
     @Operation(summary = "AI 对话", description = "多轮会话；首轮 sessionId 传空，之后带上响应回传的 sessionId")
     @PostMapping("/chat")
@@ -74,9 +77,49 @@ public class AgentController {
                         send(emitter, event.type(), toJson(event.data())));
                 emitter.complete();
             } catch (Exception e) {
-                log.warn("流式对话失败: {}", e.getMessage());
+                log.warn("流式对话失败: sessionId={}, msg={}", request.sessionId(), e.getMessage());
                 // 先把错误以事件形式告诉前端，再优雅收流——completeWithError 会直接掐断连接，
                 // 前端 read() 抛错只能显示"网络异常"，拿不到我们准备好的错误信息
+                send(emitter, "error", toJson(Map.of("message",
+                        e.getMessage() == null ? "服务异常，请稍后重试" : e.getMessage())));
+                emitter.complete();
+            }
+        });
+        return emitter;
+    }
+
+    /**
+     * Phase 5：人工裁决挂起的危险操作。approve=执行并继续对话；reject=婉拒。
+     * store.consume 放在同步段：同一 pendingId 的并发确认只有一个能成功
+     */
+    @Operation(summary = "确认/拒绝危险操作", description = "SSE 事件流同 /chat/stream；decision=approve|reject")
+    @PostMapping(value = "/chat/confirm", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @IgnoreWrap
+    public SseEmitter confirm(@AuthenticationPrincipal LoginUser loginUser,
+                              @Valid @RequestBody ConfirmWebRequest request) {
+        log.info("危险操作裁决：userId={}, pendingId={}, decision={}",
+                loginUser.getUserId(), request.pendingId(), request.decision());
+
+        PendingActionStore.PendingAction action = actionStore.consume(request.pendingId(), loginUser.getUserId());
+        SseEmitter emitter = new SseEmitter(agentProperties.getStreamTimeoutMs());
+        if (action == null) {
+            send(emitter, "error", toJson(Map.of("message",
+                    "确认已失效或不存在（可能已过期、已处理，或不是你的待确认项）")));
+            emitter.complete();
+            return emitter;
+        }
+        if (!"approve".equalsIgnoreCase(request.decision()) && !"reject".equalsIgnoreCase(request.decision())) {
+            send(emitter, "error", toJson(Map.of("message", "decision 必须是 approve 或 reject")));
+            emitter.complete();
+            return emitter;
+        }
+        agentExecutor.execute(() -> {
+            try {
+                agentService.confirm(loginUser, action, request.decision(), event ->
+                        send(emitter, event.type(), toJson(event.data())));
+                emitter.complete();
+            } catch (Exception e) {
+                log.warn("确认执行失败: sessionId={}, msg={}", action.sessionId(), e.getMessage());
                 send(emitter, "error", toJson(Map.of("message",
                         e.getMessage() == null ? "服务异常，请稍后重试" : e.getMessage())));
                 emitter.complete();

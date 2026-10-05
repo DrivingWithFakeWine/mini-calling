@@ -84,4 +84,43 @@ class UserServiceTest extends BaseIntegrationTest {
         var user = userService.getUserByUsername("zhangsan");
         assertThat(passwordEncoder.matches("new123456", user.getPassword())).isTrue();
     }
+
+    @Test
+    @DisplayName("Phase 5：admin 是受保护账号——删除/禁用/改角色全部拒绝，且账号完好（修复自删漏洞）")
+    void adminProtected_atServiceLayer() {
+        Long adminId = userService.getUserByUsername("admin").getId();
+
+        assertThatThrownBy(() -> userService.deleteUser(adminId))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("受保护");
+        assertThatThrownBy(() -> userService.setEnabled(adminId, false))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("受保护");
+        assertThatThrownBy(() -> userService.assignRoles(adminId, java.util.List.of(2L)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("受保护");
+
+        assertThat(userService.getUserById(adminId)).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Phase 5：普通用户不受护栏影响——删除后逻辑删除生效")
+    void nonAdmin_deleteStillWorks() {
+        UserCreateRequest req = new UserCreateRequest();
+        req.setUsername("guard_target");
+        req.setPassword("pass123456");
+        Long id = userService.createUser(req);
+
+        userService.deleteUser(id);
+
+        assertThat(userService.getUserById(id)).isNull();   // 逻辑删除后查不到
+    }
+
+    @Test
+    @DisplayName("Phase 5：删除不存在的用户明确报错（此前静默成功）")
+    void deleteUser_missing_explicitError() {
+        assertThatThrownBy(() -> userService.deleteUser(99999L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("用户不存在");
+    }
 }

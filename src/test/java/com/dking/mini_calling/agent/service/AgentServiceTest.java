@@ -1,11 +1,15 @@
 package com.dking.mini_calling.agent.service;
 
 import com.dking.mini_calling.agent.client.dto.ChatMessage;
+import com.dking.mini_calling.agent.client.dto.ToolCall;
 import com.dking.mini_calling.agent.config.AgentProperties;
+import com.dking.mini_calling.agent.confirm.PendingActionStore;
 import com.dking.mini_calling.agent.loop.AgentLoop;
 import com.dking.mini_calling.agent.memory.ChatMemoryStore;
+import com.dking.mini_calling.agent.tool.ToolRegistry;
 import com.dking.mini_calling.agent.web.dto.ChatWebRequest;
 import com.dking.mini_calling.agent.web.dto.ChatWebResponse;
+import com.dking.mini_calling.agent.web.dto.ConfirmWebRequest;
 import com.dking.mini_calling.common.exception.BusinessException;
 import com.dking.mini_calling.entity.SysUser;
 import com.dking.mini_calling.security.LoginUser;
@@ -15,12 +19,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -35,6 +42,8 @@ class AgentServiceTest {
     private AgentLoop agentLoop;
     private AgentProperties props;
     private ChatMemoryStore memoryStore;
+    private ToolRegistry toolRegistry;
+    private PendingActionStore actionStore;
     private AgentService service;
 
     @BeforeEach
@@ -42,7 +51,9 @@ class AgentServiceTest {
         props = new AgentProperties();
         memoryStore = new ChatMemoryStore(props);
         agentLoop = mock(AgentLoop.class);
-        service = new AgentService(props, agentLoop, memoryStore);
+        toolRegistry = mock(ToolRegistry.class);
+        actionStore = mock(PendingActionStore.class);
+        service = new AgentService(props, agentLoop, memoryStore, toolRegistry, actionStore);
     }
 
     private LoginUser admin() {
@@ -54,7 +65,7 @@ class AgentServiceTest {
     }
 
     private AgentLoop.LoopResult result(String reply) {
-        return new AgentLoop.LoopResult(reply, List.of());
+        return new AgentLoop.LoopResult(reply, List.of(), null);
     }
 
     /**
@@ -136,5 +147,117 @@ class AgentServiceTest {
         assertThat(out.sessionId()).isEqualTo("1-ghost");   // 保持原 id，客户端无感
         assertThat(memoryStore.exists("1-ghost")).isTrue(); // 重建后记忆恢复工作
         verify(agentLoop).run(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("Phase 5 正例：approve → 真实执行工具、tool 消息回填快照后恢复循环")
+    void confirm_approve_executesAndResumes() {
+        // 生产真实形态：挂起发生在铁律①之后——快照含 assistant(tool_calls)，baseCount=1+空历史
+        PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
+                "pid-1", 1L, "1-s1",
+                List.of(
+                        ChatMessage.system("sys"),
+                        ChatMessage.user("删除他"),
+                        ChatMessage.assistant(null, List.of(new ToolCall(
+                                "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
+                1, "c1", "delete_user", "{}",
+                List.of(), Instant.now());
+        when(actionStore.consume("pid-1", 1L)).thenReturn(action);
+        when(toolRegistry.invoke(any(), any(), any())).thenReturn("{\"deleted\":true}");
+        when(agentLoop.run(any(), any(), any())).thenAnswer(inv -> {
+            List<ChatMessage> msgs = inv.getArgument(0);
+            msgs.add(ChatMessage.assistant("已删除", null));
+            return result("已删除");
+        });
+
+        ChatWebResponse out = service.confirm(admin(), action, "approve", null);
+
+        assertThat(out.reply()).isEqualTo("已删除");
+        verify(toolRegistry).invoke(eq("delete_user"), eq("{}"), any());
+        var captor = listCaptor();
+        verify(agentLoop).run(captor.capture(), any(), any());
+        var msgs = captor.getValue();
+        assertThat(msgs).hasSize(5);   // 快照(3) + tool(执行结果) + assistant(最终回答，由 thenAnswer 追加)
+        assertThat(msgs.get(3).role()).isEqualTo("tool");
+        assertThat(msgs.get(3).toolCallId()).isEqualTo("c1");
+        assertThat(msgs.get(4).content()).isEqualTo("已删除");
+        assertThat(memoryStore.history("1-s1")).hasSize(4);   // baseCount=1 起截取，本轮增量入记忆
+    }
+
+    @Test
+    @DisplayName("Phase 5 正例：reject → 工具不执行，以拒绝 error 回填让模型婉拒")
+    void confirm_reject_rejected() {
+        PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
+                "pid-2", 1L, "1-s2",
+                List.of(
+                        ChatMessage.system("sys"),
+                        ChatMessage.user("删除他"),
+                        ChatMessage.assistant(null, List.of(new ToolCall(
+                                "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
+                1, "c1", "delete_user", "{}",
+                List.of(), Instant.now());
+        when(actionStore.consume("pid-2", 1L)).thenReturn(action);
+        when(agentLoop.run(any(), any(), any())).thenAnswer(inv -> {
+            List<ChatMessage> msgs = inv.getArgument(0);
+            msgs.add(ChatMessage.assistant("好的，不删了", null));
+            return result("好的，不删了");
+        });
+
+        ChatWebResponse out = service.confirm(admin(), action, "reject", null);
+
+        verify(toolRegistry, never()).invoke(any(), any(), any());   // 拒绝 = 工具不执行
+        var captor = listCaptor();
+        verify(agentLoop).run(captor.capture(), any(), any());
+        var msgs = captor.getValue();
+        assertThat(msgs.get(3).content()).contains("用户拒绝了");
+        assertThat(memoryStore.history("1-s2")).hasSize(4);   // 拒绝的时间线同样入记忆
+    }
+
+    @Test
+    @DisplayName("Phase 5 反例：decision 非法 → 明确报错（pendingId 失效的校验在 Controller 同步段）")
+    void confirm_invalidDecision_throws() {
+        PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
+                "pid-3", 1L, "1-s3",
+                List.of(ChatMessage.system("sys"), ChatMessage.user("删除他")),
+                2, "c1", "delete_user", "{}",
+                List.of(), Instant.now());
+
+        assertThatThrownBy(() -> service.confirm(admin(), action, "bogus", null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("approve");
+    }
+
+    @Test
+    @DisplayName("Phase 5 边界：并行 remainingCalls 里还有危险工具 → 执行完安全部分后再次挂起，绝不越权执行")
+    void confirm_remainingCallAlsoNeedsConfirm_rePends() {
+        PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
+                "pid-4", 1L, "1-s4",
+                List.of(
+                        ChatMessage.system("sys"),
+                        ChatMessage.user("删两个"),
+                        ChatMessage.assistant(null, List.of(
+                                new ToolCall("c1", "function", new ToolCall.Function("delete_user", "{}")),
+                                new ToolCall("c2", "function", new ToolCall.Function("delete_user", "{\"nickname\":\"x\"}"))))),
+                1, "c1", "delete_user", "{}",
+                List.of(new ToolCall("c2", "function", new ToolCall.Function("delete_user", "{\"nickname\":\"x\"}"))),
+                Instant.now());
+        when(actionStore.consume("pid-4", 1L)).thenReturn(action);
+        when(toolRegistry.needConfirm("delete_user")).thenReturn(true);
+        when(toolRegistry.invoke(eq("delete_user"), eq("{}"), any())).thenReturn("{\"deleted\":true}");
+        // 再次挂起时仓库要能创建新动作
+        when(actionStore.create(any(), any(), any(), eq(1), eq("c2"), eq("delete_user"), eq("{\"nickname\":\"x\"}"), any()))
+                .thenReturn(new PendingActionStore.PendingAction(
+                        "pid-5", 1L, "1-s4", List.of(), 1,
+                        "c2", "delete_user", "{}", List.of(), Instant.now()));
+
+        ChatWebResponse out = service.confirm(admin(), action, "approve", null);
+
+        // 第二个工具绝不能被执行；而是生成了新的挂起
+        verify(toolRegistry, times(1)).invoke(any(), any(), any());   // 只有被确认的第一个
+        assertThat(out.confirmation()).isNotNull();
+        assertThat(out.confirmation().pendingId()).isEqualTo("pid-5");
+        assertThat(out.confirmation().toolName()).isEqualTo("delete_user");
+        verify(actionStore).create(eq(1L), eq("1-s4"), any(), eq(1), eq("c2"),
+                eq("delete_user"), eq("{\"nickname\":\"x\"}"), any());
     }
 }

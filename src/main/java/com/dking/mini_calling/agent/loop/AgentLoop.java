@@ -82,10 +82,10 @@ public class AgentLoop {
 
             if (assistant.toolCalls() == null || assistant.toolCalls().isEmpty()) {
                 if ("length".equalsIgnoreCase(resp.choices().get(0).finishReason())) {
-                    return new LoopResult("回答因长度限制被截断，请把问题拆小一点再问", traces);
+                    return new LoopResult("回答因长度限制被截断，请把问题拆小一点再问", traces, null);
                 }
                 String content = assistant.content() == null ? "（模型没有返回内容）" : assistant.content();
-                return new LoopResult(content, traces);
+                return new LoopResult(content, traces, null);
             }
 
             // 模型一次可能点名多个工具（"并行" tool_calls），逐个串行执行即可
@@ -93,6 +93,20 @@ public class AgentLoop {
                 ToolCall call = assistant.toolCalls().get(i);
                 // 智谱的 tool_call.id 偶发为空：本地补占位，保持"每个 tool 消息都有 id"的协议闭合
                 String callId = StringUtils.hasText(call.id()) ? call.id() : "call_" + round + "_" + i;
+
+                // Phase 5：危险操作不执行，打包挂起等人工确认。
+                // 快照此刻的完整数组（含铁律①的 assistant 和本轮已执行的工具结果），
+                // 恢复时在此基础上执行该工具并继续循环
+                if (toolRegistry.needConfirm(call.function().name())) {
+                    PendingConfirmation pending = new PendingConfirmation(
+                            List.copyOf(messages),
+                            callId,
+                            call.function().name(),
+                            call.function().arguments(),
+                            List.copyOf(assistant.toolCalls().subList(i + 1, assistant.toolCalls().size())));
+                    return new LoopResult(null, traces, pending);
+                }
+
                 if (streaming) {
                     sink.accept(AgentEvent.tool(call.function().name(), call.function().arguments()));
                 }
@@ -106,7 +120,7 @@ public class AgentLoop {
             }
         }
         // 终止兜底：模型反复点名工具不停手时，强制止血
-        return new LoopResult("已达最大工具调用轮数（" + props.getMaxRounds() + "），请把问题拆小一点再问", traces);
+        return new LoopResult("已达最大工具调用轮数（" + props.getMaxRounds() + "），请把问题拆小一点再问", traces, null);
     }
 
     /** 喂给前端的轨迹只留摘要，工具返回再大也不撑爆响应体 */
@@ -114,6 +128,7 @@ public class AgentLoop {
         return json.length() <= 200 ? json : json.substring(0, 200) + "…";
     }
 
-    public record LoopResult(String reply, List<ToolTrace> traces) {
+    /** pending 非 null = 循环因等待人工确认而挂起，reply 为 null；恢复时以快照重新调 run() 继续 */
+    public record LoopResult(String reply, List<ToolTrace> traces, PendingConfirmation pending) {
     }
 }

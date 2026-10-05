@@ -19,6 +19,10 @@
   .msg.ai { align-self: flex-start; background: #fff; border: 1px solid #e5e9ef; border-bottom-left-radius: 2px; }
   .msg.err { align-self: center; background: #fef2f2; color: #b91c1c; font-size: 13px; }
   .msg.trace { align-self: flex-start; background: #eef2ff; color: #4b5563; font-size: 12px; padding: 6px 10px; font-family: Consolas, monospace; }
+  .msg.warn { align-self: flex-start; background: #fffbeb; border: 1px solid #fde68a; color: #92400e; font-size: 13px; }
+  .msg.warn button { margin: 10px 8px 0 0; padding: 5px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .msg.warn button.ok { background: #16a34a; color: #fff; }
+  .msg.warn button.no { background: #dc2626; color: #fff; }
   footer { display: flex; gap: 8px; padding: 14px 20px; background: #fff; border-top: 1px solid #e5e9ef; }
   footer input { flex: 1; padding: 10px 14px; border: 1px solid #d5dbe3; border-radius: 6px; }
   footer button { padding: 10px 26px; border: none; background: #3b82f6; color: #fff; border-radius: 6px; cursor: pointer; }
@@ -97,6 +101,112 @@
     return div;
   }
 
+  // SSE 读取循环（send 和 confirmAction 共用）：按行切出 event:/data:，解析后回调
+  async function readSse(res, onEvent) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', currentEvent = null;
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          try { onEvent(currentEvent, JSON.parse(line.slice(5).trim())); } catch (e) { /* 忽略坏行 */ }
+          currentEvent = null;
+        }
+      }
+    }
+  }
+
+  // 事件渲染器：send 与 confirmAction 共用同一套 UI 反应逻辑
+  function streamRenderer(waiting) {
+    let aiBubble = null, reply = '', traceCard = null;
+    return (ev, data) => {
+      if (ev === 'start') {
+        sessionId = data.sessionId;                          // 会话 id 在首个事件就到手
+      } else if (ev === 'delta') {
+        if (waiting) { waiting.remove(); waiting = null; }
+        if (!aiBubble) aiBubble = addMsg('', 'ai');
+        reply += data.text;
+        aiBubble.textContent = reply;
+        chat.scrollTop = chat.scrollHeight;
+      } else if (ev === 'tool') {
+        if (waiting) { waiting.remove(); waiting = null; }
+        traceCard = addMsg('🔧 ' + data.tool + '(' + (data.arguments || '{}') + ') 执行中…', 'trace');
+      } else if (ev === 'tool_result') {
+        if (traceCard) traceCard.textContent = traceCard.textContent.replace(' 执行中…', ' → ' + data.result);
+      } else if (ev === 'confirm_required') {
+        if (waiting) { waiting.remove(); waiting = null; }
+        renderConfirmCard(data);
+      } else if (ev === 'error') {
+        if (waiting) { waiting.remove(); waiting = null; }
+        addMsg('出错：' + data.message, 'err');
+      }
+    };
+  }
+
+  // Phase 5：危险操作确认卡片。批准/拒绝都调 /agent/chat/confirm 继续后端挂起的循环
+  function renderConfirmCard(data) {
+    const card = document.createElement('div');
+    card.className = 'msg warn';
+    card.innerHTML = '<div>⚠️ 即将执行危险操作，请确认：</div>'
+        + '<div style="font-family:Consolas,monospace;margin-top:4px;">' + data.tool
+        + '(' + (data.arguments || '{}') + ')</div>';
+    const row = document.createElement('div');
+    const yes = document.createElement('button');
+    yes.className = 'ok';
+    yes.textContent = '✅ 确认执行';
+    yes.onclick = () => { row.remove(); confirmAction(data.pendingId, 'approve'); };
+    const no = document.createElement('button');
+    no.className = 'no';
+    no.textContent = '🚫 拒绝';
+    no.onclick = () => { row.remove(); confirmAction(data.pendingId, 'reject'); };
+    row.append(yes, no);
+    card.append(row);
+    chat.append(card);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  async function confirmAction(pendingId, decision) {
+    const btn = document.getElementById('sendBtn');
+    btn.disabled = true;
+    const waiting = addMsg(decision === 'approve' ? '已确认，继续执行…' : '已拒绝，等待回复…', 'ai');
+    try {
+      const res = await fetch('/agent/chat/confirm', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token, 'Accept': 'text/event-stream'},
+        body: JSON.stringify({pendingId, decision})
+      });
+      if (res.status === 401) { doLogout(false); addMsg('登录已过期，请重新登录', 'err'); return; }
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        waiting.remove();
+        addMsg('出错了：' + (body.message || res.status), 'err');
+        return;
+      }
+      const render = streamRenderer(waiting);
+      await readSse(res, (ev, data) => {
+        if (ev === 'error') { waiting.remove(); addMsg('出错：' + data.message, 'err'); return; }
+        render(ev, data);
+      });
+      if (waiting.parentNode) waiting.remove();
+    } catch (e) {
+      if (waiting.parentNode) waiting.remove();
+      addMsg('网络异常：' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+      input_focus();
+    }
+  }
+
+  function input_focus() { document.getElementById('input').focus(); }
+
   async function login() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
@@ -124,31 +234,7 @@
     btn.disabled = true;
     const waiting = addMsg('思考中…', 'ai');
 
-    // 事件驱动的渲染：首个 delta 到达时才创建 AI 气泡，之后逐段追加（打字机效果）
-    let aiBubble = null;
-    let reply = '';
-    let currentEvent = null;
-    let traceCard = null;
-
-    const handle = (ev, data) => {
-      if (ev === 'start') {
-        sessionId = data.sessionId;                          // 会话 id 在首个事件就到手
-      } else if (ev === 'delta') {
-        if (!aiBubble) { waiting.remove(); aiBubble = addMsg('', 'ai'); }
-        reply += data.text;
-        aiBubble.textContent = reply;
-        chat.scrollTop = chat.scrollHeight;
-      } else if (ev === 'tool') {
-        waiting.remove();
-        traceCard = addMsg('🔧 ' + data.tool + '(' + (data.arguments || '{}') + ') 执行中…', 'trace');
-      } else if (ev === 'tool_result') {
-        if (traceCard) traceCard.textContent = traceCard.textContent.replace(' 执行中…', ' → ' + data.result);
-      } else if (ev === 'error') {
-        waiting.remove();
-        addMsg('出错：' + data.message, 'err');
-      }
-    };
-
+    const render = streamRenderer(waiting);   // 与 confirmAction 共用同一套事件→UI 反应
     try {
       const res = await fetch('/agent/chat/stream', {
         method: 'POST',
@@ -165,34 +251,14 @@
         return;
       }
 
-      // 手写 SSE 行协议解析：event: 行记事件名，data: 行取载荷并触发处理
-      // （EventSource 不能带 JWT 请求头，所以我们用 fetch + ReadableStream）
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, {stream: true});
-        let idx;
-        while ((idx = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (line.startsWith('event:')) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            try { handle(currentEvent, JSON.parse(line.slice(5).trim())); } catch (e) { /* 忽略坏行 */ }
-            currentEvent = null;
-          }
-        }
-      }
-      if (!aiBubble && waiting.parentNode) waiting.remove();   // 流结束仍无内容：收掉占位
+      await readSse(res, render);
+      if (waiting.parentNode) waiting.remove();   // 流结束仍无内容：收掉占位
     } catch (e) {
       if (waiting.parentNode) waiting.remove();
       addMsg('网络异常：' + e.message, 'err');
     } finally {
       btn.disabled = false;
-      input.focus();
+      input_focus();
     }
   }
 </script>

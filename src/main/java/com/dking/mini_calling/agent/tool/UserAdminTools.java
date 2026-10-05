@@ -186,6 +186,11 @@ public class UserAdminTools {
         }
 
         @Override
+        public boolean needConfirm() {
+            return true;   // 禁用账号影响他人登录，执行前必须人工确认
+        }
+
+        @Override
         public String execute(JsonNode args, ToolContext ctx) throws Exception {
             Long userId = ToolArgs.longValue(args, "userId");
             JsonNode enabled = args.get("enabled");
@@ -231,6 +236,11 @@ public class UserAdminTools {
         @Override
         public String requiredPermission() {
             return "user:delete";
+        }
+
+        @Override
+        public boolean needConfirm() {
+            return true;   // 删除是破坏性操作，执行前必须人工确认
         }
 
         @Override
@@ -280,6 +290,11 @@ public class UserAdminTools {
         @Override
         public String requiredPermission() {
             return "role:assign";
+        }
+
+        @Override
+        public boolean needConfirm() {
+            return true;   // 角色变更直接影响权限边界，执行前必须人工确认
         }
 
         @Override

@@ -8,6 +8,7 @@ import com.dking.mini_calling.agent.client.dto.ChatRequest;
 import com.dking.mini_calling.agent.client.dto.ChatResponse;
 import com.dking.mini_calling.agent.client.dto.ToolCall;
 import com.dking.mini_calling.agent.config.AgentProperties;
+import com.dking.mini_calling.agent.tool.AgentTool;
 import com.dking.mini_calling.agent.tool.CurrentTimeTool;
 import com.dking.mini_calling.agent.tool.EchoTool;
 import com.dking.mini_calling.agent.tool.ToolContext;
@@ -19,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -246,5 +248,62 @@ class AgentLoopTest {
 
         assertThat(result.reply()).isEqualTo("现在是 12:00");
         assertThat(events).extracting(AgentEvent::type).containsExactly("tool", "tool_result", "delta");
+    }
+
+    @Test
+    @DisplayName("Phase 5：needConfirm 工具 → 循环挂起返回 pending，工具未执行，快照完整")
+    void needConfirm_suspendsLoop() {
+        AgentTool confirmTool = mock(AgentTool.class);
+        when(confirmTool.name()).thenReturn("dangerous_thing");
+        when(confirmTool.description()).thenReturn("危险操作");
+        when(confirmTool.parametersSchema()).thenReturn(Map.of("type", "object", "properties", Map.of()));
+        when(confirmTool.requiredPermission()).thenReturn("");
+        when(confirmTool.needConfirm()).thenReturn(true);
+        registry = new ToolRegistry(List.of(confirmTool));
+        loop = new AgentLoop(props, llmClient, registry);
+
+        when(llmClient.chat(any())).thenReturn(toolCallResp(call("c1", "dangerous_thing", "{}")));
+
+        AgentLoop.LoopResult result = loop.run(new ArrayList<>(List.of(ChatMessage.user("删了他"))), ctx);
+
+        assertThat(result.pending()).isNotNull();
+        assertThat(result.reply()).isNull();
+        assertThat(result.pending().callId()).isEqualTo("c1");
+        assertThat(result.pending().toolName()).isEqualTo("dangerous_thing");
+        assertThat(result.pending().toolArguments()).isEqualTo("{}");
+        assertThat(result.pending().remainingCalls()).isEmpty();
+        assertThat(result.pending().messagesSnapshot()).hasSize(2);
+        assertThat(result.pending().messagesSnapshot().get(0).role()).isEqualTo("user");
+        assertThat(result.pending().messagesSnapshot().get(1).toolCalls()).isNotEmpty();   // 铁律①快照
+        verify(llmClient, times(1)).chat(any());   // 只有一跳：挂起后不再调 LLM
+    }
+
+    @Test
+    @DisplayName("Phase 5：approve 恢复——工具结果以 tool 消息回填快照，run() 复用生成最终回答")
+    void resumeAfterConfirm_reusesRun() {
+        AgentTool confirmTool = mock(AgentTool.class);
+        when(confirmTool.name()).thenReturn("dangerous_thing");
+        when(confirmTool.description()).thenReturn("危险操作");
+        when(confirmTool.parametersSchema()).thenReturn(Map.of("type", "object", "properties", Map.of()));
+        when(confirmTool.requiredPermission()).thenReturn("");
+        when(confirmTool.needConfirm()).thenReturn(true);
+        registry = new ToolRegistry(List.of(confirmTool));
+        loop = new AgentLoop(props, llmClient, registry);
+
+        when(llmClient.chat(any())).thenReturn(
+                toolCallResp(call("c1", "dangerous_thing", "{}")),
+                textResp("执行完成", "stop"));
+
+        AgentLoop.LoopResult first = loop.run(new ArrayList<>(List.of(ChatMessage.user("做事"))), ctx);
+        assertThat(first.pending()).isNotNull();
+
+        // 模拟 AgentService.confirm(approve) 的恢复动作：快照 + 工具结果 → 再调 run()
+        List<ChatMessage> resumed = new ArrayList<>(first.pending().messagesSnapshot());
+        resumed.add(ChatMessage.tool(first.pending().callId(), "{\"done\":true}"));
+        AgentLoop.LoopResult finalResult = loop.run(resumed, ctx);
+
+        assertThat(finalResult.reply()).isEqualTo("执行完成");
+        assertThat(finalResult.pending()).isNull();
+        assertThat(resumed).hasSize(4);   // user + assistant(tc) + tool + assistant(最终)
     }
 }

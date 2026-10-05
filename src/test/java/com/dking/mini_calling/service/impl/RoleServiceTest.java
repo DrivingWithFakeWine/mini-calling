@@ -114,7 +114,7 @@ class RoleServiceTest extends BaseIntegrationTest {
 
         assertThatThrownBy(() -> roleService.deleteRole(adminId))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("不允许删除");
+                .hasMessageContaining("受保护");
     }
 }
 

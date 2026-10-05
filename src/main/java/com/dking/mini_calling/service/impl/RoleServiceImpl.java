@@ -8,6 +8,7 @@ import com.dking.mini_calling.dto.RoleCreateRequest;
 import com.dking.mini_calling.dto.RolePageResponse;
 import com.dking.mini_calling.dto.RoleUpdateRequest;
 import com.dking.mini_calling.entity.SysRole;
+import com.dking.mini_calling.entity.SysUser;
 import com.dking.mini_calling.mapper.RoleMapper;
 import com.dking.mini_calling.service.RoleService;
 import lombok.RequiredArgsConstructor;
@@ -80,9 +81,7 @@ public class RoleServiceImpl implements RoleService {
         if (role == null) {
             throw new BusinessException("角色不存在");
         }
-        if ("admin".equals(role.getCode())) {
-            throw new BusinessException("内置管理员角色仅允许修改名称");
-        }
+        guardAdmin(role);
 
         role.setName(req.getName());
         roleMapper.updateById(role);
@@ -101,9 +100,7 @@ public class RoleServiceImpl implements RoleService {
         if (role == null) {
             throw new BusinessException("角色不存在");
         }
-        if ("admin".equals(role.getCode())) {
-            throw new BusinessException("不允许删除内置管理员角色");
-        }
+        guardAdmin(role);
 
         // 三步必须同事务：清用户关联 → 清权限关联 → 删角色
         roleMapper.deleteUserRoleByRoleId(id);
@@ -118,5 +115,11 @@ public class RoleServiceImpl implements RoleService {
         resp.setName(role.getName());
         resp.setPermissionIds(permissionIds);
         return resp;
+    }
+
+    private void guardAdmin(SysRole role) {
+        if (role.getId() == 1L || "admin".equals(role.getName())) {
+            throw new BusinessException("admin 是受保护角色，禁止此操作");
+        }
     }
 }

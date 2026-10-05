@@ -33,6 +33,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<Void>> handleBusiness(BusinessException e) {
+        // Phase 5 可观测性：此前业务异常只回前端、后台零痕迹。warn 级别足够（预期内错误，无堆栈需求）
+        log.warn("业务异常: {}", e.getMessage());
         return build(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 

@@ -138,6 +138,8 @@ public class LlmClient {
     }
 
     private BusinessException translate(int status, String body) {
+        // Phase 5 可观测性：错误以前只到前端、后台无痕迹（排障盲区）。现在留一条含上游摘要的日志
+        log.warn("LLM 调用失败: status={}, upstream={}", status, abbreviate(body));
         if (status == 401 || status == 403) {
             return new BusinessException("LLM API Key 无效或未授权，请检查 ZHIPU_API_KEY 配置");
         }
@@ -147,6 +149,14 @@ public class LlmClient {
         // 智谱错误体形如 {"error":{"code":"1211","message":"您的模型名称不正确..."}}
         String detail = extractUpstreamMessage(body);
         return new BusinessException("LLM 调用失败(HTTP " + status + ")" + (detail == null ? "" : "：" + detail));
+    }
+
+    /** 日志里只留上游响应摘要，完整响应体进日志会成为另一个泄露面 */
+    private String abbreviate(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= 200 ? s : s.substring(0, 200) + "…";
     }
 
     private String extractUpstreamMessage(String body) {

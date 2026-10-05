@@ -23,4 +23,10 @@ public record AgentEvent(String type, Map<String, Object> data) {
     public static AgentEvent toolResult(String name, String summary) {
         return new AgentEvent("tool_result", Map.of("tool", name, "result", summary));
     }
+
+    /** Phase 5：危险操作等待人工确认，前端据此渲染确认卡片 */
+    public static AgentEvent confirmRequired(String pendingId, String toolName, String toolArguments) {
+        return new AgentEvent("confirm_required",
+                Map.of("pendingId", pendingId, "tool", toolName, "arguments", toolArguments));
+    }
 }

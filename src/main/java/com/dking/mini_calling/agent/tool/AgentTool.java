@@ -27,6 +27,14 @@ public interface AgentTool {
     String requiredPermission();
 
     /**
+     * 是否为危险操作、执行前需要人工确认（Phase 5 的 human-in-the-loop）。
+     * 用 default 方法演进接口：存量工具零改动，危险工具覆写为 true
+     */
+    default boolean needConfirm() {
+        return false;
+    }
+
+    /**
      * 执行工具。
      *
      * @param args 模型传来的参数（已是解析好的 JSON 树，取值前仍应做存在性/类型校验——模型会传错）

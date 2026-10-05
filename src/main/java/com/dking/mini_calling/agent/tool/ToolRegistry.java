@@ -42,6 +42,12 @@ public class ToolRegistry {
                 .toList();
     }
 
+    /** 该工具是否需要人工确认（Phase 5 危险操作挂起用）；未知工具名返回 false（会走未知工具错误路径） */
+    public boolean needConfirm(String name) {
+        AgentTool tool = tools.get(name);
+        return tool != null && tool.needConfirm();
+    }
+
     public String invoke(String name, String argumentsJson, ToolContext ctx) {
         AgentTool tool = tools.get(name);
         if (tool == null) {

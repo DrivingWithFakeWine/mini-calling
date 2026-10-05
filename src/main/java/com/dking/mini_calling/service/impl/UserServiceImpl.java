@@ -64,7 +64,12 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void deleteUser(Long id) {
-        userMapper.deleteById(id);   // 逻辑删除，MP 自动改 deleted 字段
+        SysUser user = userMapper.selectById(id);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        guardAdmin(user);
+        userMapper.deleteById(id);
     }
 
     @Override
@@ -96,9 +101,11 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void assignRoles(Long userId, List<Long> roleIds) {
-        if (userMapper.selectById(userId) == null) {
+        SysUser target = userMapper.selectById(userId);
+        if (target == null) {
             throw new BusinessException("用户不存在");
         }
+        guardAdmin(target);   // 改 admin 的角色 = 可能摘掉它的权限，一并禁止
         // 先清空再批量插入，幂等
         userMapper.deleteUserRolesByUserId(userId);
         if (roleIds != null && !roleIds.isEmpty()) {
@@ -112,6 +119,7 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
+        guardAdmin(user);
         user.setEnabled(enabled ? 1 : 0);
         userMapper.updateById(user);
     }
@@ -129,6 +137,14 @@ public class UserServiceImpl implements UserService {
     @Override
     public SysUser getUserById(Long id) {
         return userMapper.selectById(id);   // 逻辑删除的查不到，返回 null
+    }
+
+    /** 业务不变量：admin 是受保护账号，任何修改操作一律拒绝。
+     *  放在 Service 层——REST、agent 工具、未来任何新入口都逃不过这道闸（Phase 5 修复自删漏洞） */
+    private void guardAdmin(SysUser user) {
+        if (user.getId() == 1L || "admin".equals(user.getUsername())) {
+            throw new BusinessException("admin 是受保护账号，禁止此操作");
+        }
     }
 }
 
