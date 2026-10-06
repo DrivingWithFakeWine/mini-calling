@@ -331,4 +331,40 @@ class AgentLoopTest {
         assertThat(messages.get(2).content()).isEqualTo(AgentLoop.REJECTED_JSON);
         verify(confirmTool, never()).execute(any(), any());   // 拒绝 = 绝不执行
     }
+
+    @Test
+    @DisplayName("Phase 5.2：reject 只拒绝当前工具，同批剩余的（武松）继续独立弹确认卡片")
+    void reject_remainingCallsStillGetTheirOwnConfirmation() throws Exception {
+        AgentTool confirmTool = mock(AgentTool.class);
+        when(confirmTool.name()).thenReturn("set_user_enabled");
+        when(confirmTool.description()).thenReturn("启停账号");
+        when(confirmTool.parametersSchema()).thenReturn(Map.of("type", "object", "properties", Map.of()));
+        when(confirmTool.requiredPermission()).thenReturn("");
+        when(confirmTool.needConfirm()).thenReturn(true);
+        registry = new ToolRegistry(List.of(confirmTool));
+        loop = new AgentLoop(props, llmClient, registry);
+
+        // 一条消息点名启用三个人：哈哈哥(c1)、孙二娘(c2)、武松(c3)
+        when(llmClient.chat(any())).thenReturn(toolCallResp(
+                call("c1", "set_user_enabled", "{}"),
+                call("c2", "set_user_enabled", "{}"),
+                call("c3", "set_user_enabled", "{}")));
+
+        AgentLoop.LoopResult first = loop.run(
+                new ArrayList<>(List.of(ChatMessage.user("启用哈哈哥，成功后再启用孙二娘和武松"))), ctx);
+        assertThat(first.pending().callId()).isEqualTo("c1");   // 先挂起哈哈哥
+
+        // 批准哈哈哥：resume 真实执行 c1，随即孙二娘(c2)过闸再次挂起
+        List<ChatMessage> messages = new ArrayList<>(first.pending().messagesSnapshot());
+        AgentLoop.LoopResult second = loop.resume(first.pending(), messages, ctx, null);
+        assertThat(second.pending()).isNotNull();
+        assertThat(second.pending().callId()).isEqualTo("c2");
+
+        // 拒绝孙二娘：只有 c2 被拒绝，武松(c3)必须独立弹自己的确认卡片
+        AgentLoop.LoopResult third = loop.reject(second.pending(), messages, ctx, null);
+        assertThat(third.pending()).isNotNull();
+        assertThat(third.pending().callId()).isEqualTo("c3");
+        assertThat(messages).hasSize(4);   // user + assistant + tool(c1已执行) + tool(c2拒绝)
+        verify(confirmTool, times(1)).execute(any(), any());   // 只有获批的哈哈哥执行过
+    }
 }

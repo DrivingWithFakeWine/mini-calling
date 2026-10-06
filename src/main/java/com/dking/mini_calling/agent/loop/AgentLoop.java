@@ -86,14 +86,18 @@ public class AgentLoop {
         return runLoop(messages, ctx, out, sink != null, traces);
     }
 
-    /** 拒绝：被挂起的工具与其余调用都以"用户拒绝"回填，模型基于它生成婉拒答复 */
+    /**
+     * 拒绝：只拒绝被挂起的这一个工具（以"用户拒绝"回填）；同批剩余的调用继续过确认闸，
+     * 由用户逐个独立裁决——拒绝一个绝不等于放弃全部（Phase 5.2 实测反馈修正）
+     */
     public LoopResult reject(PendingConfirmation pending, List<ChatMessage> messages,
                              ToolContext ctx, Consumer<AgentEvent> sink) {
         Consumer<AgentEvent> out = sinkOrSilent(sink);
         List<ToolTrace> traces = new ArrayList<>();
         messages.add(ChatMessage.tool(pending.callId(), REJECTED_JSON));
-        for (ToolCall rest : pending.remainingCalls()) {
-            messages.add(ChatMessage.tool(rest.id(), REJECTED_JSON));
+        PendingConfirmation next = runToolCalls(pending.remainingCalls(), 0, messages, ctx, out, traces);
+        if (next != null) {
+            return new LoopResult(null, traces, next);   // 剩余里还有危险工具：继续弹确认卡片
         }
         return runLoop(messages, ctx, out, sink != null, traces);
     }
