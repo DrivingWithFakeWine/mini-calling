@@ -279,8 +279,8 @@ class AgentLoopTest {
     }
 
     @Test
-    @DisplayName("Phase 5：approve 恢复——工具结果以 tool 消息回填快照，run() 复用生成最终回答")
-    void resumeAfterConfirm_reusesRun() {
+    @DisplayName("Phase 5：resume 恢复——批准的工具被执行回填，继续循环生成最终回答")
+    void resumeAfterConfirm_reusesRun() throws Exception {
         AgentTool confirmTool = mock(AgentTool.class);
         when(confirmTool.name()).thenReturn("dangerous_thing");
         when(confirmTool.description()).thenReturn("危险操作");
@@ -297,13 +297,38 @@ class AgentLoopTest {
         AgentLoop.LoopResult first = loop.run(new ArrayList<>(List.of(ChatMessage.user("做事"))), ctx);
         assertThat(first.pending()).isNotNull();
 
-        // 模拟 AgentService.confirm(approve) 的恢复动作：快照 + 工具结果 → 再调 run()
         List<ChatMessage> resumed = new ArrayList<>(first.pending().messagesSnapshot());
-        resumed.add(ChatMessage.tool(first.pending().callId(), "{\"done\":true}"));
-        AgentLoop.LoopResult finalResult = loop.run(resumed, ctx);
+        AgentLoop.LoopResult finalResult = loop.resume(first.pending(), resumed, ctx, null);
 
         assertThat(finalResult.reply()).isEqualTo("执行完成");
         assertThat(finalResult.pending()).isNull();
-        assertThat(resumed).hasSize(4);   // user + assistant(tc) + tool + assistant(最终)
+        assertThat(resumed).hasSize(4);   // user + assistant(tc) + tool(已执行回填) + assistant(最终)
+        verify(confirmTool).execute(any(), any());   // 批准后真实执行
+    }
+
+    @Test
+    @DisplayName("Phase 5：reject → 被挂起的工具与其余调用都以拒绝回填，绝不执行")
+    void reject_backfillsRejectedJson() throws Exception {
+        AgentTool confirmTool = mock(AgentTool.class);
+        when(confirmTool.name()).thenReturn("dangerous_thing");
+        when(confirmTool.description()).thenReturn("危险操作");
+        when(confirmTool.parametersSchema()).thenReturn(Map.of("type", "object", "properties", Map.of()));
+        when(confirmTool.requiredPermission()).thenReturn("");
+        when(confirmTool.needConfirm()).thenReturn(true);
+        registry = new ToolRegistry(List.of(confirmTool));
+        loop = new AgentLoop(props, llmClient, registry);
+
+        when(llmClient.chat(any())).thenReturn(
+                toolCallResp(call("c1", "dangerous_thing", "{}")),
+                textResp("好的，不删了", "stop"));
+
+        AgentLoop.LoopResult first = loop.run(new ArrayList<>(List.of(ChatMessage.user("删了他"))), ctx);
+        List<ChatMessage> messages = new ArrayList<>(first.pending().messagesSnapshot());
+        AgentLoop.LoopResult result = loop.reject(first.pending(), messages, ctx, null);
+
+        assertThat(result.reply()).isEqualTo("好的，不删了");
+        assertThat(messages).hasSize(4);
+        assertThat(messages.get(2).content()).isEqualTo(AgentLoop.REJECTED_JSON);
+        verify(confirmTool, never()).execute(any(), any());   // 拒绝 = 绝不执行
     }
 }

@@ -5,8 +5,8 @@ import com.dking.mini_calling.agent.client.dto.ToolCall;
 import com.dking.mini_calling.agent.config.AgentProperties;
 import com.dking.mini_calling.agent.confirm.PendingActionStore;
 import com.dking.mini_calling.agent.loop.AgentLoop;
+import com.dking.mini_calling.agent.loop.PendingConfirmation;
 import com.dking.mini_calling.agent.memory.ChatMemoryStore;
-import com.dking.mini_calling.agent.tool.ToolRegistry;
 import com.dking.mini_calling.agent.web.dto.ChatWebRequest;
 import com.dking.mini_calling.agent.web.dto.ChatWebResponse;
 import com.dking.mini_calling.agent.web.dto.ConfirmWebRequest;
@@ -42,7 +42,6 @@ class AgentServiceTest {
     private AgentLoop agentLoop;
     private AgentProperties props;
     private ChatMemoryStore memoryStore;
-    private ToolRegistry toolRegistry;
     private PendingActionStore actionStore;
     private AgentService service;
 
@@ -51,9 +50,8 @@ class AgentServiceTest {
         props = new AgentProperties();
         memoryStore = new ChatMemoryStore(props);
         agentLoop = mock(AgentLoop.class);
-        toolRegistry = mock(ToolRegistry.class);
         actionStore = mock(PendingActionStore.class);
-        service = new AgentService(props, agentLoop, memoryStore, toolRegistry, actionStore);
+        service = new AgentService(props, agentLoop, memoryStore, actionStore);
     }
 
     private LoginUser admin() {
@@ -163,19 +161,19 @@ class AgentServiceTest {
                 1, "c1", "delete_user", "{}",
                 List.of(), Instant.now());
         when(actionStore.consume("pid-1", 1L)).thenReturn(action);
-        when(toolRegistry.invoke(any(), any(), any())).thenReturn("{\"deleted\":true}");
-        when(agentLoop.run(any(), any(), any())).thenAnswer(inv -> {
-            List<ChatMessage> msgs = inv.getArgument(0);
+        // 模拟 AgentLoop.resume 的契约：执行被批准的工具（回填 tool 消息）+ 继续循环（追加最终回答）
+        when(agentLoop.resume(any(), any(), any(), any())).thenAnswer(inv -> {
+            List<ChatMessage> msgs = inv.getArgument(1);
+            msgs.add(ChatMessage.tool("c1", "{\"deleted\":true}"));
             msgs.add(ChatMessage.assistant("已删除", null));
-            return result("已删除");
+            return new AgentLoop.LoopResult("已删除", List.of(), null);
         });
 
         ChatWebResponse out = service.confirm(admin(), action, "approve", null);
 
         assertThat(out.reply()).isEqualTo("已删除");
-        verify(toolRegistry).invoke(eq("delete_user"), eq("{}"), any());
         var captor = listCaptor();
-        verify(agentLoop).run(captor.capture(), any(), any());
+        verify(agentLoop).resume(any(), captor.capture(), any(), any());
         var msgs = captor.getValue();
         assertThat(msgs).hasSize(5);   // 快照(3) + tool(执行结果) + assistant(最终回答，由 thenAnswer 追加)
         assertThat(msgs.get(3).role()).isEqualTo("tool");
@@ -197,17 +195,18 @@ class AgentServiceTest {
                 1, "c1", "delete_user", "{}",
                 List.of(), Instant.now());
         when(actionStore.consume("pid-2", 1L)).thenReturn(action);
-        when(agentLoop.run(any(), any(), any())).thenAnswer(inv -> {
-            List<ChatMessage> msgs = inv.getArgument(0);
+        // 模拟 AgentLoop.reject 的契约：拒绝消息 + 婉拒答复入时间线，工具不执行
+        when(agentLoop.reject(any(), any(), any(), any())).thenAnswer(inv -> {
+            List<ChatMessage> msgs = inv.getArgument(1);
+            msgs.add(ChatMessage.tool("c1", AgentLoop.REJECTED_JSON));
             msgs.add(ChatMessage.assistant("好的，不删了", null));
-            return result("好的，不删了");
+            return new AgentLoop.LoopResult("好的，不删了", List.of(), null);
         });
 
         ChatWebResponse out = service.confirm(admin(), action, "reject", null);
 
-        verify(toolRegistry, never()).invoke(any(), any(), any());   // 拒绝 = 工具不执行
         var captor = listCaptor();
-        verify(agentLoop).run(captor.capture(), any(), any());
+        verify(agentLoop).reject(any(), captor.capture(), any(), any());
         var msgs = captor.getValue();
         assertThat(msgs.get(3).content()).contains("用户拒绝了");
         assertThat(memoryStore.history("1-s2")).hasSize(4);   // 拒绝的时间线同样入记忆
@@ -228,23 +227,23 @@ class AgentServiceTest {
     }
 
     @Test
-    @DisplayName("Phase 5 边界：并行 remainingCalls 里还有危险工具 → 执行完安全部分后再次挂起，绝不越权执行")
-    void confirm_remainingCallAlsoNeedsConfirm_rePends() {
+    @DisplayName("Phase 5 边界：resume 返回新挂起（链式确认）→ 新动作入库并通知前端")
+    void confirm_chainedPending_createsNextAction() {
         PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
                 "pid-4", 1L, "1-s4",
                 List.of(
                         ChatMessage.system("sys"),
                         ChatMessage.user("删两个"),
-                        ChatMessage.assistant(null, List.of(
-                                new ToolCall("c1", "function", new ToolCall.Function("delete_user", "{}")),
-                                new ToolCall("c2", "function", new ToolCall.Function("delete_user", "{\"nickname\":\"x\"}"))))),
+                        ChatMessage.assistant(null, List.of(new ToolCall(
+                                "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
                 1, "c1", "delete_user", "{}",
-                List.of(new ToolCall("c2", "function", new ToolCall.Function("delete_user", "{\"nickname\":\"x\"}"))),
-                Instant.now());
+                List.of(), Instant.now());
         when(actionStore.consume("pid-4", 1L)).thenReturn(action);
-        when(toolRegistry.needConfirm("delete_user")).thenReturn(true);
-        when(toolRegistry.invoke(eq("delete_user"), eq("{}"), any())).thenReturn("{\"deleted\":true}");
-        // 再次挂起时仓库要能创建新动作
+        // resume 后又出现新的危险工具调用 → 返回挂起结果
+        when(agentLoop.resume(any(), any(), any(), any())).thenReturn(new AgentLoop.LoopResult(
+                null, List.of(), new PendingConfirmation(
+                        List.of(ChatMessage.user("删两个")),
+                        "c2", "delete_user", "{\"nickname\":\"x\"}", List.of())));
         when(actionStore.create(any(), any(), any(), eq(1), eq("c2"), eq("delete_user"), eq("{\"nickname\":\"x\"}"), any()))
                 .thenReturn(new PendingActionStore.PendingAction(
                         "pid-5", 1L, "1-s4", List.of(), 1,
@@ -252,8 +251,7 @@ class AgentServiceTest {
 
         ChatWebResponse out = service.confirm(admin(), action, "approve", null);
 
-        // 第二个工具绝不能被执行；而是生成了新的挂起
-        verify(toolRegistry, times(1)).invoke(any(), any(), any());   // 只有被确认的第一个
+        // 新挂起入库并作为 Confirmation 返回
         assertThat(out.confirmation()).isNotNull();
         assertThat(out.confirmation().pendingId()).isEqualTo("pid-5");
         assertThat(out.confirmation().toolName()).isEqualTo("delete_user");
