@@ -22,6 +22,16 @@ spring:
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
+  # ──────── Spring AI 框架版助手（Phase 6，与手写版并存对比） ────────
+  ai:
+    openai:
+      api-key: ${ZHIPU_API_KEY:dummy-key}              # 与手写版共用同一把智谱 key
+      base-url: https://open.bigmodel.cn
+      chat:
+        completions-path: /api/paas/v4/chat/completions   # 关键坑：智谱路径不是 OpenAI 默认的 /v1/chat/completions
+        options:
+          model: glm-4.6
+          temperature: 0.6
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/*.xml
