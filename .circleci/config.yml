@@ -1,0 +1,49 @@
+version: 2.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/openjdk:17.0
+    steps:
+      - checkout
+      - setup_remote_docker          # Testcontainers 需要 Docker 环境（集成测试用真实 MySQL）
+      - restore_cache:
+          keys:
+            - maven-{{ checksum "pom.xml" }}
+            - maven-
+      - run:
+          name: 运行全量测试
+          command: mvn -B test
+      - save_cache:
+          paths:
+            - ~/.m2/repository
+          key: maven-{{ checksum "pom.xml" }}
+
+  build:
+    docker:
+      - image: cimg/openjdk:17.0
+    steps:
+      - checkout
+      - setup_remote_docker
+      - restore_cache:
+          keys:
+            - maven-{{ checksum "pom.xml" }}
+            - maven-
+      - run:
+          name: 打包（跳过测试，测试已在 test job 完成）
+          command: mvn -B package -DskipTests
+      - run:
+          name: 构建应用镜像（验证 Dockerfile）
+          command: docker build -t mini_calling:${CIRCLE_SHA1:0:7} .
+      - save_cache:
+          paths:
+            - ~/.m2/repository
+          key: maven-{{ checksum "pom.xml" }}
+
+workflows:
+  verify:
+    jobs:
+      - test
+      - build:
+          requires:
+            - test

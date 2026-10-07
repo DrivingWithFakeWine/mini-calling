@@ -9,6 +9,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/mini_calling?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: rootpass
+      ZHIPU_API_KEY: ${ZHIPU_API_KEY}   # 从宿主机环境变量注入，手写版与 Spring AI 版共用
     depends_on:
       - mysql
 
