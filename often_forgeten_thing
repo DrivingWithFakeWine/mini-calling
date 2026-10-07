@@ -5,3 +5,6 @@ docker化部署，关机后再次启动：docker compose start
 
 f32d480bdb1a   mini_calling-app            "java -jar /app/app.…"   16 hours ago   Up 11 seconds   0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp                                                mini_calling-app-1
 c85e19b8f430   mysql:8.0                   "docker-entrypoint.s…"   16 hours ago   Up 12 seconds   0.0.0.0:3307->3306/tcp, [::]:3307->3306/tcp                                                mini_calling-mysql-1
+
+
+ai对话网页地址：http://localhost:8080/chat.html

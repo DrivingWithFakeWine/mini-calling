@@ -153,13 +153,14 @@ class AgentServiceTest {
         // 生产真实形态：挂起发生在铁律①之后——快照含 assistant(tool_calls)，baseCount=1+空历史
         PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
                 "pid-1", 1L, "1-s1",
-                List.of(
-                        ChatMessage.system("sys"),
-                        ChatMessage.user("删除他"),
-                        ChatMessage.assistant(null, List.of(new ToolCall(
-                                "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
-                1, "c1", "delete_user", "{}",
-                List.of(), Instant.now());
+                new PendingConfirmation(
+                        List.of(
+                                ChatMessage.system("sys"),
+                                ChatMessage.user("删除他"),
+                                ChatMessage.assistant(null, List.of(new ToolCall(
+                                        "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
+                        "c1", "delete_user", "{}", List.of()),
+                1, Instant.now());
         when(actionStore.consume("pid-1", 1L)).thenReturn(action);
         // 模拟 AgentLoop.resume 的契约：执行被批准的工具（回填 tool 消息）+ 继续循环（追加最终回答）
         when(agentLoop.resume(any(), any(), any(), any())).thenAnswer(inv -> {
@@ -187,13 +188,14 @@ class AgentServiceTest {
     void confirm_reject_rejected() {
         PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
                 "pid-2", 1L, "1-s2",
-                List.of(
-                        ChatMessage.system("sys"),
-                        ChatMessage.user("删除他"),
-                        ChatMessage.assistant(null, List.of(new ToolCall(
-                                "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
-                1, "c1", "delete_user", "{}",
-                List.of(), Instant.now());
+                new PendingConfirmation(
+                        List.of(
+                                ChatMessage.system("sys"),
+                                ChatMessage.user("删除他"),
+                                ChatMessage.assistant(null, List.of(new ToolCall(
+                                        "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
+                        "c1", "delete_user", "{}", List.of()),
+                1, Instant.now());
         when(actionStore.consume("pid-2", 1L)).thenReturn(action);
         // 模拟 AgentLoop.reject 的契约：拒绝消息 + 婉拒答复入时间线，工具不执行
         when(agentLoop.reject(any(), any(), any(), any())).thenAnswer(inv -> {
@@ -217,9 +219,10 @@ class AgentServiceTest {
     void confirm_invalidDecision_throws() {
         PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
                 "pid-3", 1L, "1-s3",
-                List.of(ChatMessage.system("sys"), ChatMessage.user("删除他")),
-                2, "c1", "delete_user", "{}",
-                List.of(), Instant.now());
+                new PendingConfirmation(
+                        List.of(ChatMessage.system("sys"), ChatMessage.user("删除他")),
+                        "c1", "delete_user", "{}", List.of()),
+                2, Instant.now());
 
         assertThatThrownBy(() -> service.confirm(admin(), action, "bogus", null))
                 .isInstanceOf(BusinessException.class)
@@ -229,25 +232,26 @@ class AgentServiceTest {
     @Test
     @DisplayName("Phase 5 边界：resume 返回新挂起（链式确认）→ 新动作入库并通知前端")
     void confirm_chainedPending_createsNextAction() {
+        var chainedPending = new PendingConfirmation(
+                List.of(ChatMessage.user("删两个")),
+                "c2", "delete_user", "{\"nickname\":\"x\"}", List.of());
         PendingActionStore.PendingAction action = new PendingActionStore.PendingAction(
                 "pid-4", 1L, "1-s4",
-                List.of(
-                        ChatMessage.system("sys"),
-                        ChatMessage.user("删两个"),
-                        ChatMessage.assistant(null, List.of(new ToolCall(
-                                "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
-                1, "c1", "delete_user", "{}",
-                List.of(), Instant.now());
+                new PendingConfirmation(
+                        List.of(
+                                ChatMessage.system("sys"),
+                                ChatMessage.user("删两个"),
+                                ChatMessage.assistant(null, List.of(new ToolCall(
+                                        "c1", "function", new ToolCall.Function("delete_user", "{}"))))),
+                        "c1", "delete_user", "{}", List.of()),
+                1, Instant.now());
         when(actionStore.consume("pid-4", 1L)).thenReturn(action);
         // resume 后又出现新的危险工具调用 → 返回挂起结果
         when(agentLoop.resume(any(), any(), any(), any())).thenReturn(new AgentLoop.LoopResult(
-                null, List.of(), new PendingConfirmation(
-                        List.of(ChatMessage.user("删两个")),
-                        "c2", "delete_user", "{\"nickname\":\"x\"}", List.of())));
-        when(actionStore.create(any(), any(), any(), eq(1), eq("c2"), eq("delete_user"), eq("{\"nickname\":\"x\"}"), any()))
+                null, List.of(), chainedPending));
+        when(actionStore.create(any(), any(), eq(chainedPending), eq(1)))
                 .thenReturn(new PendingActionStore.PendingAction(
-                        "pid-5", 1L, "1-s4", List.of(), 1,
-                        "c2", "delete_user", "{}", List.of(), Instant.now()));
+                        "pid-5", 1L, "1-s4", chainedPending, 1, Instant.now()));
 
         ChatWebResponse out = service.confirm(admin(), action, "approve", null);
 
@@ -255,7 +259,6 @@ class AgentServiceTest {
         assertThat(out.confirmation()).isNotNull();
         assertThat(out.confirmation().pendingId()).isEqualTo("pid-5");
         assertThat(out.confirmation().toolName()).isEqualTo("delete_user");
-        verify(actionStore).create(eq(1L), eq("1-s4"), any(), eq(1), eq("c2"),
-                eq("delete_user"), eq("{\"nickname\":\"x\"}"), any());
+        verify(actionStore).create(eq(1L), eq("1-s4"), eq(chainedPending), eq(1));
     }
 }

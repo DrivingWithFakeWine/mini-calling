@@ -106,10 +106,8 @@ public class AgentService {
         // 若挂起期间服务重启、会话已不在：原地重建，防止确认执行的时间线静默丢失
         memoryStore.ensure(action.sessionId());
 
-        List<ChatMessage> messages = new ArrayList<>(action.messagesSnapshot());
-        PendingConfirmation pending = new PendingConfirmation(
-                action.messagesSnapshot(), action.callId(), action.toolName(),
-                action.toolArguments(), action.remainingCalls());
+        List<ChatMessage> messages = new ArrayList<>(action.confirmation().messagesSnapshot());
+        PendingConfirmation pending = action.confirmation();   // 组合的红利：不再需要五字段手工重建
 
         AgentLoop.LoopResult result = approve
                 ? agentLoop.resume(pending, messages, new ToolContext(user), sink)
@@ -132,15 +130,16 @@ public class AgentService {
                                               AgentLoop.LoopResult result, int baseCount,
                                               Consumer<AgentEvent> sink) {
         PendingConfirmation pending = result.pending();
-        PendingActionStore.PendingAction action = actionStore.create(user.getUserId(), sessionId,
-                pending.messagesSnapshot(), baseCount, pending.callId(), pending.toolName(),
-                pending.toolArguments(), pending.remainingCalls());
+        PendingActionStore.PendingAction action = actionStore.create(
+                user.getUserId(), sessionId, pending, baseCount);
         if (sink != null) {
-            sink.accept(AgentEvent.confirmRequired(action.pendingId(), action.toolName(), action.toolArguments()));
+            sink.accept(AgentEvent.confirmRequired(
+                    action.pendingId(), pending.toolName(), pending.toolArguments()));
         }
-        return new ChatWebResponse("【待确认】工具 " + action.toolName() + " 等待人工确认",
+        return new ChatWebResponse("【待确认】工具 " + pending.toolName() + " 等待人工确认",
                 sessionId, result.traces(),
-                new ChatWebResponse.Confirmation(action.pendingId(), action.toolName(), action.toolArguments()));
+                new ChatWebResponse.Confirmation(
+                        action.pendingId(), pending.toolName(), pending.toolArguments()));
     }
 
     /**
